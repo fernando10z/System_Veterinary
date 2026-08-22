@@ -76,6 +76,13 @@ BEGIN
       NULLIF(p_payload->>'consultorio_id','')::uuid, p_payload->>'nota')
     RETURNING id INTO v_id;
   ELSE
+    IF NOT EXISTS (SELECT 1 FROM core.disponibilidad
+                    WHERE id = v_id
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Turno no encontrado'));
+    END IF;
+
     UPDATE core.disponibilidad SET
       fecha       = COALESCE(NULLIF(p_payload->>'fecha','')::date, fecha),
       hora_inicio = COALESCE(NULLIF(p_payload->>'hora_inicio','')::time, hora_inicio),
@@ -106,7 +113,10 @@ SET search_path = core, app, internal, public
 AS $$
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'rrhh:gestionar');
-  DELETE FROM core.disponibilidad WHERE id = p_id;
+  DELETE FROM core.disponibilidad
+   WHERE id = p_id
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('eliminado', true));
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));
@@ -140,7 +150,7 @@ BEGIN
    WHERE user_id = v_target AND fecha = CURRENT_DATE;
 
   IF NOT FOUND THEN
-    -- Tardanza: entra más de 10 min después del inicio del horario de la sede
+    -- Tardanza: entra más de 10 min después del inicio del horario de la empresa
     SELECT min(hora_inicio) INTO v_limite FROM core.horarios_atencion
      WHERE empresa_id = v_emp AND activo = true
        AND dia_semana = EXTRACT(DOW FROM CURRENT_DATE)::int;
@@ -281,7 +291,10 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'rrhh:aprobar');
 
-  SELECT * INTO v_p FROM core.permisos_laborales WHERE id = p_id;
+  SELECT * INTO v_p FROM core.permisos_laborales
+   WHERE id = p_id
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Solicitud no encontrada'));
@@ -400,6 +413,13 @@ BEGIN
       p_payload->>'documento_url', true)
     RETURNING id INTO v_id;
   ELSE
+    IF NOT EXISTS (SELECT 1 FROM core.contratos_personal
+                    WHERE id = v_id
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Contrato no encontrado'));
+    END IF;
+
     UPDATE core.contratos_personal SET
       tipo          = COALESCE((p_payload->>'tipo')::core.tipo_contrato_empleado, tipo),
       cargo         = COALESCE(p_payload->>'cargo', cargo),

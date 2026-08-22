@@ -279,10 +279,10 @@ BEGIN
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
     'periodo', jsonb_build_object('desde', p_desde, 'hasta', p_hasta),
 
-    -- Comparativo entre sedes (solo aporta con acceso global)
-    'por_sede', (
+    -- Comparativo entre empresas (solo aporta con acceso global)
+    'por_empresa', (
       SELECT COALESCE(jsonb_agg(t), '[]'::jsonb) FROM (
-        SELECT e.id, e.nombre_comercial AS sede, e.razon_social,
+        SELECT e.id, e.nombre_comercial AS empresa, e.razon_social,
                (SELECT count(*) FROM core.citas c
                  WHERE c.empresa_id = e.id AND c.deleted_at IS NULL
                    AND c.fecha_hora::date BETWEEN p_desde AND p_hasta) AS citas,

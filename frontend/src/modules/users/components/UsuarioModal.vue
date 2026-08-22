@@ -55,8 +55,8 @@
               </option>
             </select>
           </div>
-          <div v-if="!esEdicion && rolRequiereSede" class="field">
-            <label>Sede <span class="req">*</span></label>
+          <div v-if="!esEdicion && rolRequiereEmpresa" class="field">
+            <label>Empresa <span class="req">*</span></label>
             <select v-model="form.empresa_id">
               <option value="">Seleccionar…</option>
               <option v-for="e in empresas" :key="e.id" :value="e.id">
@@ -136,17 +136,17 @@ const form = reactive({
   color_agenda: props.usuario?.color_agenda ?? "#07B162",
 });
 
-/** Un rol de alcance global no se ancla a una sede: el backend la exige NULL. */
-const rolRequiereSede = computed(() => {
+/** Un rol de alcance global no se ancla a una empresa: el backend la exige NULL. */
+const rolRequiereEmpresa = computed(() => {
   const r = props.roles.find((x) => x.id === form.rol_id);
   return r ? r.scope === "empresa" : false;
 });
 
 function labelScope(s) {
-  return { global: "todas las sedes", global_restricted: "lectura global", empresa: "una sede" }[s] || s;
+  return { global: "todas las empresas", global_restricted: "lectura global", empresa: "una empresa" }[s] || s;
 }
 function onRol() {
-  if (!rolRequiereSede.value) form.empresa_id = "";
+  if (!rolRequiereEmpresa.value) form.empresa_id = "";
 }
 
 async function guardar() {
@@ -155,7 +155,7 @@ async function guardar() {
   if (!esEdicion.value) {
     if (!form.email) { error.value = "Ingresa el correo."; return; }
     if (form.password.length < 8) { error.value = "La contraseña debe tener al menos 8 caracteres."; return; }
-    if (rolRequiereSede.value && !form.empresa_id) { error.value = "Este rol necesita una sede."; return; }
+    if (rolRequiereEmpresa.value && !form.empresa_id) { error.value = "Este rol necesita una empresa."; return; }
   }
   if (form.es_veterinario && !form.colegiatura) {
     error.value = "Un veterinario necesita su número de colegiatura.";
@@ -178,7 +178,7 @@ async function guardar() {
         color_agenda: form.color_agenda,
       };
       await usersApi.actualizar(props.usuario.id, p);
-      // El rol se cambia por su propio endpoint: puede mover al usuario de sede.
+      // El rol se cambia por su propio endpoint: puede mover al usuario de empresa.
       if (form.rol_id && form.rol_id !== props.usuario.rol_id) {
         await usersApi.cambiarRol(props.usuario.id, form.rol_id, form.empresa_id || undefined);
       }

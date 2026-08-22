@@ -3,7 +3,7 @@
     <PageHeader
       eyebrow="Clínica"
       title="Propietarios"
-      :subtitle="meta.total ? `${meta.total} propietarios en la cartera` : 'Cartera compartida entre sedes'"
+      :subtitle="meta.total ? `${meta.total} propietarios en la cartera` : 'Cartera de propietarios de la empresa'"
     >
       <template #actions>
         <button class="btn" :disabled="cargando" @click="cargar">

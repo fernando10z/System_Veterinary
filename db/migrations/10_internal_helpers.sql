@@ -60,8 +60,8 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- internal.empresa_efectiva
--- Resuelve la sede sobre la que opera la llamada. Un super admin sin sede
--- asignada toma la primera sede activa (o la que venga explícita en el SP).
+-- Resuelve la empresa sobre la que opera la llamada. Un super admin sin empresa
+-- asignada toma la primera activa (o la que venga explícita en el SP).
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION internal.empresa_efectiva(
   p_user_id        UUID,
@@ -90,6 +90,34 @@ BEGIN
 
   RETURN v_emp;
 END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- internal.es_de_empresa
+-- ¿El registro pertenece a la empresa desde la que se está operando?
+--
+-- Se usa en TODO SP que recibe el id de un registro. Sin esta comprobación, un
+-- usuario de la empresa A podría modificar un registro de la empresa B con solo
+-- conocer su UUID: el permiso lo tiene (es admin de SU empresa) y el id existe.
+--
+-- Convención: cuando devuelve false se responde NOT_FOUND, no FORBIDDEN, para no
+-- revelar que el registro existe en otra empresa.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.es_de_empresa(
+  p_user_id          UUID,
+  p_is_super_admin   BOOLEAN,
+  p_empresa_contexto UUID,
+  p_empresa_registro UUID
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+  SELECT p_empresa_registro IS NOT NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin)
+          OR p_empresa_registro = p_empresa_contexto);
 $$;
 
 -- -----------------------------------------------------------------------------
@@ -122,7 +150,7 @@ BEGIN
   END IF;
 
   IF v_empresa_user IS NULL OR v_empresa_user <> p_empresa_id THEN
-    RAISE EXCEPTION 'Sin acceso a la sede indicada' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Sin acceso a la empresa indicada' USING ERRCODE = '42501';
   END IF;
 END;
 $$;
@@ -467,7 +495,7 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- internal.hay_solapamiento_cita
--- Un veterinario no puede tener dos citas encimadas en la misma sede.
+-- Un veterinario no puede tener dos citas encimadas en la misma empresa.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION internal.hay_solapamiento_cita(
   p_empresa_id     UUID,

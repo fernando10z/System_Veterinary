@@ -1,9 +1,12 @@
 # ERP Veterinario
 
-ERP multi-sede para clínicas veterinarias. Réplica funcional de `System_Veterinary`
+ERP multi-empresa para clínicas veterinarias. Réplica funcional de `System_Veterinary`
 (PHP + MySQL) sobre la arquitectura de `System_ERP`: **toda la lógica de negocio vive
 en stored procedures de PostgreSQL**; el backend es un orquestador HTTP que invoca SPs
 y propaga la respuesta `{ok, data, error, meta}`.
+
+Cada empresa es un **negocio independiente**: su cartera de clientes, sus pacientes,
+su historia clínica, su inventario, su facturación y su caja no los ve ninguna otra.
 
 **Stack**: NestJS 10 + Fastify + PostgreSQL 16 (SPs) + Redis + MinIO + Vue 3 + Vite + nginx.
 
@@ -36,7 +39,7 @@ Todas con contraseña **`Demo2026!`**:
 |---|---|---|
 | `admin@vetpatitas.pe` | Super administrador | Todas las sedes |
 | `gerencia@vetpatitas.pe` | Gerencia | Todas las sedes (solo lectura) |
-| `administracion@vetpatitas.pe` | Administrador de sede | Miraflores |
+| `administracion@vetpatitas.pe` | Administrador de empresa | Vet Patitas Miraflores |
 | `jperez@vetpatitas.pe` | Veterinario | Miraflores |
 | `mrojas@vetpatitas.pe` | Veterinario (cirugía) | Miraflores |
 | `recepcion@vetpatitas.pe` | Recepción | Miraflores |
@@ -56,27 +59,40 @@ contraseña `Mascota2026!`.
 | Lógica de negocio | 100 % en SPs de PostgreSQL | Misma decisión que System_ERP. Las reglas clínicas y contables viven junto a los datos: no hay forma de saltárselas desde otro cliente. |
 | Organización del código | Modular vertical (un módulo = una carpeta) | Para entender "facturación" abrís UNA carpeta. Escala a 20+ dominios. |
 | Capas por módulo | `controller + service + repository + dto/` | Sin `domain/application/infrastructure`: no aportan cuando la lógica está en SPs. |
-| Multi-tenancy | Columna `empresa_id` resuelta en SPs | El backend solo propaga `(user_id, empresa_id, is_super_admin)`. |
-| Historia clínica | Línea de tiempo única (`core.historia_clinica`) | Un solo SELECT ordenado devuelve consultas, vacunas, cirugías y notas. Sigue al paciente entre sedes. |
+| Multi-tenancy | Columna `empresa_id` resuelta en SPs | El backend solo propaga `(user_id, empresa_id, is_super_admin)`. 46 de 60 tablas la llevan. |
+| Cartera | Clientes y pacientes son **de cada empresa** | Son negocios independientes: el documento es único por empresa, no globalmente. Ver [ADR-002](docs/decisions/002-cartera-por-empresa.md). |
+| Historia clínica | Línea de tiempo única (`core.historia_clinica`) | Un solo SELECT ordenado devuelve consultas, vacunas, cirugías y notas del paciente. |
 | Movimiento de stock | Puerta única `internal.mover_stock` + trigger | Un solo camino toca el inventario: no hay descuadres entre el kardex y el saldo. |
 | Auth backoffice | JWT access (15 m) + refresh (7 d, whitelist en Redis) | Permite revocar una sesión concreta sin esperar a que expire. |
 | Auth portal | JWT con `type=portal`, issuer/audience propios | Un token del portal no valida contra el guard del staff, ni al revés. |
 | Storage | MinIO con URLs prefirmadas | Radiografías y consentimientos no pasan por el backend al descargarse. |
 
-### Modelo de acceso multi-sede
+### Modelo de acceso multi-empresa
 
 El alcance de cada usuario lo define el **scope de su rol** (`core.roles.scope`),
 validado por el trigger `trg_users_validate_rol_scope`:
 
 | `scope_rol` | `is_super_admin` | `empresa_id` | Ve | Roles |
 |---|---|---|---|---|
-| `global` | `true` | **NULL** | Todas las sedes, sin restricción | `super_admin` |
-| `global_restricted` | `false` | **NULL** | Todas las sedes, sin privilegios de super admin | `gerente` |
-| `empresa` | `false` | **NOT NULL** | Solo su sede | `admin_sede`, `veterinario`, `recepcion`, `almacen`, `contador` |
+| `global` | `true` | **NULL** | Todas las empresas, sin restricción | `super_admin` |
+| `global_restricted` | `false` | **NULL** | Todas las empresas, sin privilegios de super admin | `gerente` |
+| `empresa` | `false` | **NOT NULL** | Solo su empresa | `admin_empresa`, `veterinario`, `recepcion`, `almacen`, `contador` |
 
 **Regla al escribir SPs de lectura**: filtrar siempre con
 `(internal.es_acceso_global(p_user_id, p_is_super_admin) OR x.empresa_id = v_emp)`,
 nunca con `p_is_super_admin` a secas — eso ocultaría datos a gerencia.
+
+**Regla al escribir SPs de escritura**: la empresa se toma del contexto
+(`internal.empresa_efectiva`) o se hereda del registro padre, **nunca del payload**.
+Por eso una mascota no puede quedar en una empresa distinta a la de su dueño, y el
+portal no puede pedir cita en una empresa que no es la suya.
+
+#### Lo único que comparten todas las empresas
+
+Identidad del sistema (`empresas`, `roles`, `permisos`, `users`) y taxonomía de
+referencia (`especies`, `razas`, `especializaciones`). La taxonomía **solo la edita
+el super admin**, que es el operador del ERP: sin esa restricción, el administrador
+de una empresa podría renombrar una especie que usan las demás.
 
 ### Convención de respuesta
 
@@ -123,8 +139,8 @@ System_VeterinaryERP/
 | Módulo | Qué resuelve |
 |---|---|
 | **Agenda** | Tablero por estado (programada → confirmada → en sala → en atención → atendida), cálculo de huecos libres por veterinario cruzando horario de sede, turnos y permisos aprobados. Bloquea solapamientos. |
-| **Pacientes** | Ficha clínica con alertas de alergias, curva de peso, carné de vacunación y línea de tiempo unificada que sigue al paciente entre sedes. |
-| **Propietarios** | Cartera compartida entre sedes, con deuda, mascotas vinculadas y bitácora de contactos. |
+| **Pacientes** | Ficha clínica con alertas de alergias, curva de peso, carné de vacunación y línea de tiempo unificada. |
+| **Propietarios** | Cartera privada de cada empresa, con deuda, mascotas vinculadas y bitácora de contactos. |
 | **Historia clínica** | Consulta con estructura SOAP y constantes fisiológicas, cierre firmado e inmutable, cirugías con consentimiento obligatorio, hospitalización con evoluciones por turno, exámenes y documentos. |
 | **Vacunación** | Protocolos por especie que calculan el refuerzo y generan recordatorios automáticos de contacto. |
 | **Inventario** | Kardex completo, lotes con vencimiento, alertas de stock crítico y consumo clínico que descuenta stock en el acto. |
@@ -133,7 +149,7 @@ System_VeterinaryERP/
 | **Cobranzas** | Aging por tramos de mora, cobros que se imputan a los comprobantes más antiguos si no se detalla. |
 | **Caja** | Apertura por turno, movimientos y arqueo que compara efectivo contado contra esperado. |
 | **Equipo** | Carga de trabajo, asistencia con detección de tardanza, permisos que bloquean la agenda al aprobarse, evaluaciones. |
-| **Reportes** | Ventas, producción clínica, valorización de inventario y comparativo ejecutivo entre sedes. |
+| **Reportes** | Ventas, producción clínica, valorización de inventario y comparativo ejecutivo entre empresas. |
 | **Portal** | El propietario ve sus mascotas, historial (sin notas internas), citas y comprobantes, y puede solicitar cita. |
 | **Auditoría** | Bitácora con diff campo a campo de cada cambio. |
 
@@ -154,7 +170,12 @@ Están en los SPs, no en la UI, así que ningún cliente puede saltárselas:
 - Un **paciente con historia clínica** no se elimina: se marca inactivo y la historia se conserva.
 - Marcar una mascota como **fallecida** suspende sus tratamientos, cancela sus citas futuras y apaga sus recordatorios.
 - Nadie **aprueba su propio permiso** ni cambia el estado de su propia cuenta.
-- Un rol de **alcance global** no puede estar anclado a una sede (trigger).
+- Un rol de **alcance global** no puede estar anclado a una empresa (trigger).
+- Un usuario **no puede alcanzar datos de otra empresa** aunque conozca el id. Todo SP
+  que recibe un id comprueba la pertenencia con `internal.es_de_empresa` y responde
+  `NOT_FOUND` si no corresponde — no `FORBIDDEN`, para no revelar que el registro
+  existe en otra empresa. Verificado con 39 intentos de acceso cruzado (lectura,
+  edición, anulación, movimientos de stock y de caja): todos bloqueados.
 
 ---
 
@@ -178,3 +199,13 @@ pm2 start infra/pm2/ecosystem.config.js
 Antes de exponer el sistema, ver `docs/operations/despliegue.md`: cambiar la contraseña
 de `vet_app_user`, generar los secretos JWT y apuntar el backend a ese rol (que solo
 tiene `EXECUTE` sobre `app.*`, sin acceso directo a las tablas).
+
+---
+
+## 7. Dar de alta una empresa nueva
+
+Desde **Configuración → Sede → Nueva sede** (solo super admin), o por API
+`POST /api/empresas`. Al crearla se aprovisionan su almacén principal y un primer
+consultorio. Después hay que cargarle lo suyo, porque **no hereda nada** de las
+demás: horario de atención, servicios, productos y usuarios. La taxonomía de
+especies y razas sí la comparte.

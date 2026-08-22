@@ -22,13 +22,17 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_data JSONB;
+  v_global BOOLEAN := internal.es_acceso_global(p_user_id, p_is_super_admin);
+  v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_data   JSONB;
 BEGIN
   SELECT COALESCE(jsonb_agg(x ORDER BY x.nombre), '[]'::jsonb) INTO v_data
   FROM (
     SELECT e.id, e.codigo, e.nombre, e.nombre_cria, e.icono, e.estado,
+           -- El conteo es de la empresa que consulta, no de toda la instalación.
            (SELECT count(*) FROM core.mascotas m
-             WHERE m.especie_id = e.id AND m.deleted_at IS NULL) AS total_pacientes,
+             WHERE m.especie_id = e.id AND m.deleted_at IS NULL
+               AND (v_global OR m.empresa_id = v_emp)) AS total_pacientes,
            (SELECT COALESCE(jsonb_agg(jsonb_build_object(
                      'id', r.id, 'nombre', r.nombre, 'tamanio_referencia', r.tamanio_referencia,
                      'peso_min_kg', r.peso_min_kg, 'peso_max_kg', r.peso_max_kg,
@@ -61,6 +65,12 @@ AS $$
 DECLARE
   v_id UUID := NULLIF(p_payload->>'id','')::uuid;
 BEGIN
+  IF NOT p_is_super_admin THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('FORBIDDEN',
+        'La taxonomía (especies, razas y especialidades) la mantiene el operador del ERP: '
+        'es compartida por todas las empresas'));
+  END IF;
   PERFORM internal.assert_permiso(p_user_id, 'catalogos:gestionar');
   PERFORM internal.validar_payload(p_payload, ARRAY['nombre']);
 
@@ -107,6 +117,12 @@ AS $$
 DECLARE
   v_id UUID := NULLIF(p_payload->>'id','')::uuid;
 BEGIN
+  IF NOT p_is_super_admin THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('FORBIDDEN',
+        'La taxonomía (especies, razas y especialidades) la mantiene el operador del ERP: '
+        'es compartida por todas las empresas'));
+  END IF;
   PERFORM internal.assert_permiso(p_user_id, 'catalogos:gestionar');
 
   IF v_id IS NULL THEN
@@ -233,6 +249,15 @@ BEGIN
       p_user_id
     ) RETURNING id INTO v_id;
   ELSE
+    -- Editar exige que el servicio sea de la empresa: con solo el UUID, otra
+    -- empresa podría reescribir el catálogo ajeno.
+    IF NOT EXISTS (SELECT 1 FROM core.servicios
+                    WHERE id = v_id AND deleted_at IS NULL
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Servicio no encontrado'));
+    END IF;
+
     UPDATE core.servicios SET
       nombre         = COALESCE(p_payload->>'nombre', nombre),
       descripcion    = COALESCE(p_payload->>'descripcion', descripcion),
@@ -275,8 +300,16 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_usos INT;
+  v_emp  UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'servicios:gestionar');
+
+  IF NOT EXISTS (SELECT 1 FROM core.servicios
+                  WHERE id = p_id AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Servicio no encontrado'));
+  END IF;
 
   SELECT count(*) INTO v_usos FROM core.ordenes_servicio WHERE servicio_id = p_id;
   IF v_usos > 0 THEN
@@ -363,6 +396,13 @@ BEGIN
       COALESCE((p_payload->>'estado')::core.estado_generico, 'activo'))
     RETURNING id INTO v_id;
   ELSE
+    IF NOT EXISTS (SELECT 1 FROM core.categorias
+                    WHERE id = v_id
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Categoría no encontrada'));
+    END IF;
+
     UPDATE core.categorias SET
       nombre      = COALESCE(p_payload->>'nombre', nombre),
       descripcion = COALESCE(p_payload->>'descripcion', descripcion),
@@ -435,6 +475,13 @@ BEGIN
             COALESCE((p_payload->>'estado')::core.estado_generico, 'activo'))
     RETURNING id INTO v_id;
   ELSE
+    IF NOT EXISTS (SELECT 1 FROM core.consultorios
+                    WHERE id = v_id
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Consultorio no encontrado'));
+    END IF;
+
     UPDATE core.consultorios SET
       nombre    = COALESCE(p_payload->>'nombre', nombre),
       tipo      = COALESCE(p_payload->>'tipo', tipo),
@@ -530,13 +577,16 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_data JSONB;
+  v_global BOOLEAN := internal.es_acceso_global(p_user_id, p_is_super_admin);
+  v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_data   JSONB;
 BEGIN
   SELECT COALESCE(jsonb_agg(x ORDER BY x.nombre), '[]'::jsonb) INTO v_data
   FROM (
     SELECT e.id, e.codigo, e.nombre, e.descripcion, e.estado,
            (SELECT count(*) FROM core.users u
-             WHERE u.especializacion_id = e.id AND u.deleted_at IS NULL) AS veterinarios
+             WHERE u.especializacion_id = e.id AND u.deleted_at IS NULL
+               AND (v_global OR u.empresa_id = v_emp)) AS veterinarios
     FROM core.especializaciones e
   ) x;
 
@@ -561,6 +611,12 @@ AS $$
 DECLARE
   v_id UUID := NULLIF(p_payload->>'id','')::uuid;
 BEGIN
+  IF NOT p_is_super_admin THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('FORBIDDEN',
+        'La taxonomía (especies, razas y especialidades) la mantiene el operador del ERP: '
+        'es compartida por todas las empresas'));
+  END IF;
   PERFORM internal.assert_permiso(p_user_id, 'catalogos:gestionar');
 
   IF v_id IS NULL THEN
@@ -657,6 +713,13 @@ BEGIN
       COALESCE((p_payload->>'estado')::core.estado_generico, 'activo'))
     RETURNING id INTO v_id;
   ELSE
+    IF NOT EXISTS (SELECT 1 FROM core.esquemas_vacunacion
+                    WHERE id = v_id
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Protocolo no encontrado'));
+    END IF;
+
     UPDATE core.esquemas_vacunacion SET
       nombre              = COALESCE(p_payload->>'nombre', nombre),
       descripcion         = COALESCE(p_payload->>'descripcion', descripcion),
@@ -729,6 +792,13 @@ BEGIN
             COALESCE((p_payload->>'estado')::core.estado_generico, 'activo'))
     RETURNING id INTO v_id;
   ELSE
+    IF NOT EXISTS (SELECT 1 FROM core.clausulas
+                    WHERE id = v_id
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Cláusula no encontrada'));
+    END IF;
+
     UPDATE core.clausulas SET
       tipo      = COALESCE(p_payload->>'tipo', tipo),
       titulo    = COALESCE(p_payload->>'titulo', titulo),

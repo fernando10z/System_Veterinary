@@ -3,6 +3,9 @@
 --
 -- Propietarios, pacientes, agenda, historia clínica, ventas y cobros, para que
 -- el sistema se pueda mostrar con contenido creíble desde el primer arranque.
+--
+-- La operación se carga en la EMPRESA 1. La empresa 2 recibe su propia cartera
+-- pequeña, para que la demo muestre el aislamiento con datos a ambos lados.
 -- Idempotente: si ya hay clientes cargados, no hace nada.
 -- =============================================================================
 
@@ -11,6 +14,7 @@ SET search_path = core, internal, app, public;
 DO $$
 DECLARE
   v_emp     UUID;
+  v_emp2    UUID;
   v_super   UUID;
   v_vet1    UUID;
   v_vet2    UUID;
@@ -58,21 +62,23 @@ BEGIN
     ) AS t(tipo_doc, doc, nombres, ap, am, tel, correo, dir)
   LOOP
     INSERT INTO core.clientes (
-      codigo, tipo_documento, numero_documento, nombres, apellido_paterno, apellido_materno,
-      razon_social, telefono, correo, direccion, empresa_origen_id, created_by)
+      empresa_id, codigo, tipo_documento, numero_documento,
+      nombres, apellido_paterno, apellido_materno,
+      razon_social, telefono, correo, direccion, created_by)
     VALUES (
+      v_emp,
       internal.siguiente_numero(v_emp, 'CLI', 5),
       r.tipo_doc::core.tipo_documento_identidad, r.doc, r.nombres,
       NULLIF(r.ap,''), NULLIF(r.am,''),
       CASE WHEN r.tipo_doc = 'RUC' THEN r.nombres END,
-      r.tel, r.correo, r.dir, v_emp, v_super);
+      r.tel, r.correo, r.dir, v_super);
   END LOOP;
 
   -- Portal habilitado para dos propietarios (demo del área de clientes)
   UPDATE core.clientes
      SET portal_acceso = true,
          portal_password_hash = crypt('Mascota2026!', gen_salt('bf', 10))
-   WHERE numero_documento IN ('44556677','41223344');
+   WHERE empresa_id = v_emp AND numero_documento IN ('44556677','41223344');
 
   -- ---- Pacientes ------------------------------------------------------------
   FOR r IN
@@ -91,26 +97,28 @@ BEGIN
       ('48990011','Pelusa', 'FELINO','Angora',            'hembra', 'Blanco',        '2019-10-03',  4.2, true,  'Asma felino diagnosticado')
     ) AS t(doc, nombre, especie, raza, sexo, color, nacimiento, peso, esteril, alergias)
   LOOP
-    SELECT id INTO v_cli FROM core.clientes WHERE numero_documento = r.doc;
+    SELECT id INTO v_cli FROM core.clientes
+     WHERE empresa_id = v_emp AND numero_documento = r.doc;
 
     INSERT INTO core.mascotas (
-      codigo, cliente_id, nombre, especie_id, raza_id, sexo, color,
-      fecha_nacimiento, peso_kg, esterilizado, alergias, empresa_origen_id, created_by)
+      empresa_id, codigo, cliente_id, nombre, especie_id, raza_id, sexo, color,
+      fecha_nacimiento, peso_kg, esterilizado, alergias, created_by)
     VALUES (
-      internal.siguiente_numero(v_emp, 'HC', 6), v_cli, r.nombre,
+      v_emp, internal.siguiente_numero(v_emp, 'HC', 6), v_cli, r.nombre,
       (SELECT id FROM core.especies WHERE codigo = r.especie),
       (SELECT ra.id FROM core.razas ra
         JOIN core.especies e ON e.id = ra.especie_id
        WHERE e.codigo = r.especie AND ra.nombre = r.raza),
       r.sexo::core.sexo_mascota, r.color, r.nacimiento::date, r.peso,
-      r.esteril, r.alergias, v_emp, v_super);
+      r.esteril, r.alergias, v_super);
   END LOOP;
 
   -- ---------------------------------------------------------------------------
   -- Agenda: citas repartidas entre ayer, hoy y los próximos días
   -- ---------------------------------------------------------------------------
   v_i := 0;
-  FOR r IN SELECT m.id AS mascota_id, m.cliente_id FROM core.mascotas m ORDER BY m.created_at LOOP
+  FOR r IN SELECT m.id AS mascota_id, m.cliente_id FROM core.mascotas m
+            WHERE m.empresa_id = v_emp ORDER BY m.created_at LOOP
     v_i := v_i + 1;
 
     -- Citas pasadas (atendidas)
@@ -212,7 +220,7 @@ BEGIN
   -- ---------------------------------------------------------------------------
   -- Hospitalización en curso (para que el módulo tenga contenido)
   -- ---------------------------------------------------------------------------
-  SELECT id INTO v_mas FROM core.mascotas WHERE nombre = 'Thor';
+  SELECT id INTO v_mas FROM core.mascotas WHERE empresa_id = v_emp AND nombre = 'Thor';
   INSERT INTO core.hospitalizaciones (
     empresa_id, codigo, mascota_id, veterinario_id, jaula, motivo, diagnostico,
     fecha_ingreso, estado, created_by)
@@ -242,7 +250,7 @@ BEGIN
   -- ---------------------------------------------------------------------------
   -- Cirugía programada
   -- ---------------------------------------------------------------------------
-  SELECT id INTO v_mas FROM core.mascotas WHERE nombre = 'Chispa';
+  SELECT id INTO v_mas FROM core.mascotas WHERE empresa_id = v_emp AND nombre = 'Chispa';
   INSERT INTO core.cirugias (
     empresa_id, codigo, mascota_id, cirujano_id, anestesista_id, consultorio_id,
     servicio_id, nombre, descripcion, fecha_programada, anestesia_tipo,
@@ -296,7 +304,7 @@ BEGIN
          'Recordatorio de cita',
          'Se envió recordatorio de la cita programada. El propietario confirmó asistencia.',
          now() - INTERVAL '1 day'
-  FROM core.clientes c LIMIT 5;
+  FROM core.clientes c WHERE c.empresa_id = v_emp LIMIT 5;
 
   -- Turnos de los veterinarios para las próximas dos semanas
   INSERT INTO core.disponibilidad (empresa_id, user_id, fecha, hora_inicio, hora_fin, tipo)
@@ -317,5 +325,50 @@ BEGIN
   WHERE u.empresa_id = v_emp AND EXTRACT(DOW FROM d) BETWEEN 1 AND 6
   ON CONFLICT (user_id, fecha) DO NOTHING;
 
-  RAISE NOTICE 'Datos de demostración cargados.';
+  -- ---------------------------------------------------------------------------
+  -- Cartera propia de la EMPRESA 2
+  --
+  -- Ojo al DNI 44556677: es el mismo de Carla Zevallos en la empresa 1. Aquí es
+  -- otra ficha, de otro negocio, con otra historia. Eso es exactamente lo que
+  -- permite la unicidad por empresa, y deja el aislamiento a la vista en la demo.
+  -- ---------------------------------------------------------------------------
+  SELECT id INTO v_emp2 FROM core.empresas WHERE ruc = '20609876543';
+
+  FOR r IN
+    SELECT * FROM (VALUES
+      ('44556677','Carla','Zevallos','Ruiz','987654321','Av. Javier Prado 1200'),
+      ('39887766','Alonso','Ibáñez','Ferrer','976554433','Calle Los Robles 88'),
+      ('38776655','Rosa','Chávez','Delgado','975443322','Av. Aramburú 560')
+    ) AS t(doc, nombres, ap, am, tel, dir)
+  LOOP
+    INSERT INTO core.clientes (
+      empresa_id, codigo, tipo_documento, numero_documento,
+      nombres, apellido_paterno, apellido_materno, telefono, direccion, created_by)
+    VALUES (
+      v_emp2, internal.siguiente_numero(v_emp2, 'CLI', 5), 'DNI', r.doc,
+      r.nombres, r.ap, r.am, r.tel, r.dir, v_super);
+  END LOOP;
+
+  FOR r IN
+    SELECT * FROM (VALUES
+      ('44556677','Toby',  'CANINO','Beagle',        'macho', 'Tricolor', '2021-06-10', 11.2),
+      ('39887766','Michi', 'FELINO','Mestizo',       'hembra','Atigrado', '2022-09-22',  3.9),
+      ('38776655','Duque', 'CANINO','Schnauzer',     'macho', 'Sal y pimienta','2019-11-05', 8.4)
+    ) AS t(doc, nombre, especie, raza, sexo, color, nacimiento, peso)
+  LOOP
+    SELECT id INTO v_cli FROM core.clientes
+     WHERE empresa_id = v_emp2 AND numero_documento = r.doc;
+
+    INSERT INTO core.mascotas (
+      empresa_id, codigo, cliente_id, nombre, especie_id, raza_id, sexo, color,
+      fecha_nacimiento, peso_kg, created_by)
+    VALUES (
+      v_emp2, internal.siguiente_numero(v_emp2, 'HC', 6), v_cli, r.nombre,
+      (SELECT id FROM core.especies WHERE codigo = r.especie),
+      (SELECT ra.id FROM core.razas ra JOIN core.especies e ON e.id = ra.especie_id
+        WHERE e.codigo = r.especie AND ra.nombre = r.raza),
+      r.sexo::core.sexo_mascota, r.color, r.nacimiento::date, r.peso, v_super);
+  END LOOP;
+
+  RAISE NOTICE 'Datos de demostración cargados en ambas empresas.';
 END $$;

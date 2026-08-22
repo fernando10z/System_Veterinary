@@ -1,5 +1,8 @@
 -- =============================================================================
 -- 25_app_mascotas.sql — Pacientes: ficha, historia clínica y extravíos
+--
+-- Los pacientes son de la empresa: heredan empresa_id de su propietario y toda
+-- lectura filtra por él. La historia clínica de un paciente no sale de su empresa.
 -- =============================================================================
 
 SET search_path = app, internal, core, public;
@@ -34,6 +37,7 @@ BEGIN
   FROM core.mascotas m
   JOIN core.clientes c ON c.id = m.cliente_id
   WHERE m.deleted_at IS NULL
+    AND (v_global OR m.empresa_id = v_emp)
     AND (p_filtros->>'estado'     IS NULL OR m.estado::text = p_filtros->>'estado')
     AND (p_filtros->>'especie_id' IS NULL OR m.especie_id = (p_filtros->>'especie_id')::uuid)
     AND (p_filtros->>'cliente_id' IS NULL OR m.cliente_id = (p_filtros->>'cliente_id')::uuid)
@@ -70,6 +74,7 @@ BEGIN
     JOIN core.especies e ON e.id = m.especie_id
     LEFT JOIN core.razas r ON r.id = m.raza_id
     WHERE m.deleted_at IS NULL
+      AND (v_global OR m.empresa_id = v_emp)
       AND (p_filtros->>'estado'     IS NULL OR m.estado::text = p_filtros->>'estado')
       AND (p_filtros->>'especie_id' IS NULL OR m.especie_id = (p_filtros->>'especie_id')::uuid)
       AND (p_filtros->>'cliente_id' IS NULL OR m.cliente_id = (p_filtros->>'cliente_id')::uuid)
@@ -181,6 +186,7 @@ BEGIN
     JOIN core.especies e ON e.id = m.especie_id
     LEFT JOIN core.razas r ON r.id = m.raza_id
     WHERE m.id = p_id AND m.deleted_at IS NULL
+      AND (v_global OR m.empresa_id = v_emp)
   ) x;
 
   IF v_data IS NULL THEN
@@ -196,7 +202,7 @@ END;
 $$;
 
 -- -----------------------------------------------------------------------------
--- app.fn_mascota_historia — línea de tiempo clínica completa
+-- app.fn_mascota_historia — línea de tiempo clínica del paciente
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.fn_mascota_historia(
   p_user_id        UUID,
@@ -217,10 +223,20 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  -- Si el paciente no es de la empresa, se responde NOT_FOUND igual que en el
+  -- resto del módulo. Devolver una lista vacía sugeriría que existe pero no
+  -- tiene historia, que es otra cosa.
+  IF NOT EXISTS (SELECT 1 FROM core.mascotas
+                  WHERE id = p_mascota_id AND deleted_at IS NULL
+                    AND (v_global OR empresa_id = v_emp)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Paciente no encontrado'));
+  END IF;
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha DESC), '[]'::jsonb) INTO v_data
   FROM (
     SELECT h.id, h.tipo_evento, h.fecha, h.titulo, h.resumen, h.entidad_id, h.cita_id,
-           h.empresa_id, emp.nombre_comercial AS sede,
+           h.empresa_id, emp.nombre_comercial AS empresa,
            h.veterinario_id,
            trim(u.nombres || ' ' || COALESCE(u.apellido_paterno,'')) AS veterinario,
            u.colegiatura
@@ -228,8 +244,7 @@ BEGIN
     LEFT JOIN core.users u ON u.id = h.veterinario_id
     LEFT JOIN core.empresas emp ON emp.id = h.empresa_id
     WHERE h.mascota_id = p_mascota_id
-      -- La historia clínica sigue al paciente entre sedes: no se filtra por
-      -- empresa salvo que el usuario no tenga acceso global.
+      -- Cada empresa ve solo los eventos que registró: son negocios distintos.
       AND (v_global OR h.empresa_id = v_emp)
       AND (p_tipo IS NULL OR h.tipo_evento::text = p_tipo)
     ORDER BY h.fecha DESC
@@ -258,31 +273,39 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_id  UUID;
-  v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_id   UUID;
+  v_emp  UUID;   -- se hereda del propietario, ver abajo
   v_chip TEXT := NULLIF(p_payload->>'microchip','');
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'mascotas:crear');
   PERFORM internal.validar_payload(p_payload, ARRAY['cliente_id','nombre','especie_id']);
 
-  IF NOT EXISTS (SELECT 1 FROM core.clientes
-                  WHERE id = (p_payload->>'cliente_id')::uuid AND deleted_at IS NULL) THEN
+  -- La empresa la manda el propietario, no el payload: así una mascota nunca
+  -- queda en una empresa distinta a la de su dueño.
+  SELECT empresa_id INTO v_emp FROM core.clientes
+   WHERE id = (p_payload->>'cliente_id')::uuid AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin)
+          OR empresa_id = internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin));
+
+  IF v_emp IS NULL THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','El propietario indicado no existe','cliente_id'));
   END IF;
 
   IF v_chip IS NOT NULL AND EXISTS (
-      SELECT 1 FROM core.mascotas WHERE microchip = v_chip AND deleted_at IS NULL) THEN
+      SELECT 1 FROM core.mascotas
+       WHERE empresa_id = v_emp AND microchip = v_chip AND deleted_at IS NULL) THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('CONFLICT','Ese microchip ya está registrado en otro paciente','microchip'));
   END IF;
 
   INSERT INTO core.mascotas (
-    codigo, cliente_id, nombre, especie_id, raza_id, raza_libre, sexo, color,
+    empresa_id, codigo, cliente_id, nombre, especie_id, raza_id, raza_libre, sexo, color,
     senias_particulares, fecha_nacimiento, edad_aproximada_meses, peso_kg, tamanio,
     esterilizado, fecha_esterilizacion, microchip, num_placa, foto_url,
-    alergias, condiciones_cronicas, observaciones, empresa_origen_id, created_by
+    alergias, condiciones_cronicas, observaciones, created_by
   ) VALUES (
+    v_emp,
     COALESCE(NULLIF(p_payload->>'codigo',''), internal.siguiente_numero(v_emp, 'HC', 6)),
     (p_payload->>'cliente_id')::uuid,
     p_payload->>'nombre',
@@ -304,7 +327,7 @@ BEGIN
     p_payload->>'alergias',
     p_payload->>'condiciones_cronicas',
     p_payload->>'observaciones',
-    v_emp, p_user_id
+    p_user_id
   ) RETURNING id INTO v_id;
 
   PERFORM internal.registrar_auditoria(p_user_id, v_emp, 'crear', 'mascotas', v_id, NULL, p_payload);
@@ -339,7 +362,8 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'mascotas:editar');
 
   SELECT to_jsonb(m) INTO v_antes FROM core.mascotas m
-   WHERE m.id = p_id AND m.deleted_at IS NULL;
+   WHERE m.id = p_id AND m.deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR m.empresa_id = v_emp);
 
   IF v_antes IS NULL THEN
     RETURN jsonb_build_object('ok', false,
@@ -347,7 +371,9 @@ BEGIN
   END IF;
 
   IF v_chip IS NOT NULL AND EXISTS (
-      SELECT 1 FROM core.mascotas WHERE microchip = v_chip AND id <> p_id AND deleted_at IS NULL) THEN
+      SELECT 1 FROM core.mascotas
+       WHERE empresa_id = (v_antes->>'empresa_id')::uuid
+         AND microchip = v_chip AND id <> p_id AND deleted_at IS NULL) THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('CONFLICT','Ese microchip ya está registrado en otro paciente','microchip'));
   END IF;
@@ -403,8 +429,17 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_eventos INT;
+  v_emp     UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'mascotas:eliminar');
+
+  IF NOT EXISTS (SELECT 1 FROM core.mascotas
+                  WHERE id = p_id AND deleted_at IS NULL
+                    AND (internal.es_acceso_global(p_user_id, p_is_super_admin)
+                         OR empresa_id = v_emp)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Paciente no encontrado'));
+  END IF;
 
   SELECT count(*) INTO v_eventos FROM core.historia_clinica WHERE mascota_id = p_id;
 
@@ -447,13 +482,23 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_id UUID;
+  v_id  UUID;
+  v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','fecha_extravio']);
 
+  IF NOT EXISTS (SELECT 1 FROM core.mascotas
+                  WHERE id = (p_payload->>'mascota_id')::uuid AND deleted_at IS NULL
+                    AND (internal.es_acceso_global(p_user_id, p_is_super_admin)
+                         OR empresa_id = v_emp)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Paciente no encontrado','mascota_id'));
+  END IF;
+
   INSERT INTO core.mascotas_extraviadas (
-    mascota_id, fecha_extravio, zona, descripcion, contacto, recompensa, created_by
+    empresa_id, mascota_id, fecha_extravio, zona, descripcion, contacto, recompensa, created_by
   ) VALUES (
+    v_emp,
     (p_payload->>'mascota_id')::uuid,
     (p_payload->>'fecha_extravio')::date,
     p_payload->>'zona',
@@ -490,6 +535,8 @@ BEGIN
   UPDATE core.mascotas_extraviadas
      SET encontrado = true, fecha_hallazgo = CURRENT_DATE
    WHERE id = p_id
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin)
+          OR empresa_id = internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin))
    RETURNING mascota_id INTO v_mascota;
 
   IF NOT FOUND THEN
@@ -519,7 +566,9 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_data JSONB;
+  v_global BOOLEAN := internal.es_acceso_global(p_user_id, p_is_super_admin);
+  v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_data   JSONB;
 BEGIN
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_extravio DESC), '[]'::jsonb) INTO v_data
   FROM (
@@ -534,7 +583,8 @@ BEGIN
     JOIN core.clientes c ON c.id = m.cliente_id
     JOIN core.especies e ON e.id = m.especie_id
     LEFT JOIN core.razas r ON r.id = m.raza_id
-    WHERE (p_solo_activos = false OR me.encontrado = false)
+    WHERE (v_global OR me.empresa_id = v_emp)
+      AND (p_solo_activos = false OR me.encontrado = false)
   ) x;
 
   RETURN jsonb_build_object('ok', true, 'data', v_data);

@@ -67,8 +67,8 @@ BEGIN
            m.nombre AS mascota, m.foto_url AS mascota_foto,
            s.nombre AS servicio,
            trim(u.nombres || ' ' || COALESCE(u.apellido_paterno,'')) AS veterinario,
-           e.nombre_comercial AS sede, e.direccion_fiscal AS sede_direccion,
-           e.telefono AS sede_telefono
+           e.nombre_comercial AS empresa, e.direccion_fiscal AS empresa_direccion,
+           e.telefono AS empresa_telefono
     FROM core.citas c
     JOIN core.mascotas m ON m.id = c.mascota_id
     JOIN core.empresas e ON e.id = c.empresa_id
@@ -112,7 +112,7 @@ BEGIN
         'tipo_evento', h.tipo_evento, 'fecha', h.fecha,
         'titulo', h.titulo, 'resumen', h.resumen,
         'veterinario', trim(u.nombres || ' ' || COALESCE(u.apellido_paterno,'')),
-        'sede', e.nombre_comercial) ORDER BY h.fecha DESC), '[]'::jsonb)
+        'empresa', e.nombre_comercial) ORDER BY h.fecha DESC), '[]'::jsonb)
       FROM core.historia_clinica h
       LEFT JOIN core.users u ON u.id = h.veterinario_id
       LEFT JOIN core.empresas e ON e.id = h.empresa_id
@@ -161,7 +161,7 @@ BEGIN
   FROM (
     SELECT c.id, c.tipo, c.numero_completo, c.fecha_emision, c.fecha_vencimiento,
            c.total, c.saldo_pendiente, c.estado_pago, c.moneda, c.pdf_url,
-           m.nombre AS mascota, e.nombre_comercial AS sede
+           m.nombre AS mascota, e.nombre_comercial AS empresa
     FROM core.comprobantes c
     JOIN core.empresas e ON e.id = c.empresa_id
     LEFT JOIN core.mascotas m ON m.id = c.mascota_id
@@ -198,7 +198,7 @@ DECLARE
   v_fecha   TIMESTAMPTZ := (p_payload->>'fecha_hora')::timestamptz;
   v_dur     INT;
 BEGIN
-  PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','fecha_hora','empresa_id']);
+  PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','fecha_hora']);
 
   IF NOT EXISTS (SELECT 1 FROM core.mascotas
                   WHERE id = v_mascota AND cliente_id = p_cliente_id AND deleted_at IS NULL) THEN
@@ -206,7 +206,14 @@ BEGIN
       'error', internal.error_jsonb('FORBIDDEN','Esa mascota no está asociada a tu cuenta'));
   END IF;
 
-  v_emp := (p_payload->>'empresa_id')::uuid;
+  -- La empresa NO viene del payload: es la del propietario. Así no puede pedir
+  -- cita en una empresa que no es la suya aunque manipule la petición.
+  SELECT empresa_id INTO v_emp FROM core.clientes WHERE id = p_cliente_id;
+
+  IF v_emp IS NULL THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Cuenta sin empresa asociada'));
+  END IF;
 
   IF v_fecha < now() THEN
     RETURN jsonb_build_object('ok', false,

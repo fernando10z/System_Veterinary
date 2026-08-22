@@ -2,20 +2,20 @@
   <div>
     <PageHeader
       eyebrow="Configuración"
-      title="Sede"
-      :subtitle="empresa?.razon_social || 'Datos de la clínica'"
+      title="Empresa"
+      :subtitle="empresa?.razon_social || 'Datos del negocio'"
     >
       <template #actions>
-        <div v-if="esSuperAdmin && sedes.length > 1" class="fil">
+        <div v-if="esSuperAdmin && empresas.length > 1" class="fil">
           <Building2 :size="14" />
-          <select v-model="sedeId" @change="cargarSede">
-            <option v-for="s in sedes" :key="s.id" :value="s.id">
+          <select v-model="empresaId" @change="cargarEmpresa">
+            <option v-for="s in empresas" :key="s.id" :value="s.id">
               {{ s.nombre_comercial || s.razon_social }}
             </option>
           </select>
         </div>
         <button v-if="esSuperAdmin" class="btn" @click="modalNueva = true">
-          <Plus :size="14" /> Nueva sede
+          <Plus :size="14" /> Nueva empresa
         </button>
         <button class="btn primary" :disabled="guardando" @click="guardar">
           <Save :size="14" /> {{ guardando ? "Guardando…" : "Guardar cambios" }}
@@ -36,7 +36,7 @@
       </div>
     </div>
 
-    <div v-else-if="empresa" class="sede-grid">
+    <div v-else-if="empresa" class="empresa-grid">
       <section class="module-panel">
         <header class="module-panel-head">
           <h2><span class="head-icon"><Building2 :size="14" /></span> Datos de la clínica</h2>
@@ -46,7 +46,7 @@
             <div class="field">
               <label>RUC</label>
               <input v-model.trim="f.ruc" type="text" disabled />
-              <small class="muted">El RUC identifica a la sede y no se edita aquí.</small>
+              <small class="muted">El RUC identifica a la empresa y no se edita aquí.</small>
             </div>
             <div class="field">
               <label>Razón social</label>
@@ -139,7 +139,7 @@
               <small class="muted">Define el tamaño de los huecos de la agenda.</small>
             </div>
             <div class="field">
-              <label>Estado de la sede</label>
+              <label>Estado de la empresa</label>
               <select v-model="f.estado" :disabled="!esSuperAdmin">
                 <option value="activa">Activa</option>
                 <option value="suspendida">Suspendida</option>
@@ -154,17 +154,17 @@
         <header class="module-panel-head">
           <h2>
             <span class="head-icon"><Network :size="14" /></span>
-            Sedes de la cadena
-            <span class="head-meta">{{ sedes.length }}</span>
+            Empresas de la instalación
+            <span class="head-meta">{{ empresas.length }}</span>
           </h2>
         </header>
         <div class="module-panel-body tabla-wrap">
           <table>
             <thead>
-              <tr><th>Sede</th><th>RUC</th><th class="num">Personal</th><th class="num">Citas hoy</th><th>Estado</th></tr>
+              <tr><th>Empresa</th><th>RUC</th><th class="num">Personal</th><th class="num">Citas hoy</th><th>Estado</th></tr>
             </thead>
             <tbody>
-              <tr v-for="s in sedes" :key="s.id" class="clickable" @click="sedeId = s.id; cargarSede()">
+              <tr v-for="s in empresas" :key="s.id" class="clickable" @click="empresaId = s.id; cargarEmpresa()">
                 <td>
                   <div class="stack">
                     <strong>{{ s.nombre_comercial || s.razon_social }}</strong>
@@ -186,17 +186,18 @@
       </section>
     </div>
 
-    <!-- Nueva sede -->
+    <!-- Nueva empresa -->
     <div v-if="modalNueva" class="modal-back" @click="modalNueva = false">
       <div class="modal modal-wide" @click.stop>
-        <div class="m-head"><h3>Nueva sede</h3></div>
+        <div class="m-head"><h3>Nueva empresa</h3></div>
         <div class="m-body">
           <div v-if="errorNueva" class="callout danger" style="margin-bottom: 12px">
             <AlertCircle :size="15" /> <span>{{ errorNueva }}</span>
           </div>
           <p class="muted" style="margin-top: 0">
-            Al crear la sede se aprovisionan automáticamente su almacén principal
-            y un primer consultorio, para que pueda operar desde el día uno.
+            Al crear la empresa se aprovisionan su almacén principal y un primer
+            consultorio. No hereda nada de las demás: su catálogo de servicios,
+            productos, horario y usuarios se cargan aparte.
           </p>
           <div class="form-grid">
             <div class="field">
@@ -223,8 +224,8 @@
         </div>
         <div class="m-foot modal-actions">
           <button class="btn" @click="modalNueva = false">Cancelar</button>
-          <button class="btn primary" :disabled="guardando" @click="crearSede">
-            {{ guardando ? "Creando…" : "Crear sede" }}
+          <button class="btn primary" :disabled="guardando" @click="crearEmpresa">
+            {{ guardando ? "Creando…" : "Crear empresa" }}
           </button>
         </div>
       </div>
@@ -247,8 +248,8 @@ const { isSuperAdmin } = useAuth();
 const esSuperAdmin = computed(() => isSuperAdmin.value);
 
 const empresa = ref(null);
-const sedes = ref([]);
-const sedeId = ref("");
+const empresas = ref([]);
+const empresaId = ref("");
 const cargando = ref(true);
 const guardando = ref(false);
 const error = ref("");
@@ -274,12 +275,12 @@ function hidratar(e) {
   f.igv_tasa = Number(e.igv_tasa ?? 0.18);
 }
 
-async function cargarSede() {
+async function cargarEmpresa() {
   cargando.value = true;
   try {
-    const r = sedeId.value ? await empresasApi.obtener(sedeId.value) : await empresasApi.actual();
+    const r = empresaId.value ? await empresasApi.obtener(empresaId.value) : await empresasApi.actual();
     hidratar(r.data);
-    sedeId.value = r.data.id;
+    empresaId.value = r.data.id;
   } catch (e) {
     error.value = e.message;
   } finally {
@@ -298,8 +299,8 @@ async function guardar() {
       p[k] = v;
     }
     await empresasApi.actualizar(empresa.value.id, p);
-    mensaje.value = "Datos de la sede actualizados.";
-    await cargarSede();
+    mensaje.value = "Datos de la empresa actualizados.";
+    await cargarEmpresa();
   } catch (e) {
     error.value = e.message;
   } finally {
@@ -307,7 +308,7 @@ async function guardar() {
   }
 }
 
-async function crearSede() {
+async function crearEmpresa() {
   errorNueva.value = "";
   if (!nueva.ruc || !nueva.razon_social) {
     errorNueva.value = "RUC y razón social son obligatorios.";
@@ -331,18 +332,18 @@ async function crearSede() {
 async function cargarTodo() {
   try {
     const l = await empresasApi.listar();
-    sedes.value = l.data ?? [];
+    empresas.value = l.data ?? [];
   } catch {
-    // Un usuario de sede única no necesita el listado completo.
+    // Un usuario de una sola empresa no necesita el listado completo.
   }
-  await cargarSede();
+  await cargarEmpresa();
 }
 
 onMounted(cargarTodo);
 </script>
 
 <style scoped>
-.sede-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-@media (max-width: 1000px) { .sede-grid { grid-template-columns: 1fr; } }
+.empresa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .empresa-grid { grid-template-columns: 1fr; } }
 .req { color: var(--red); }
 </style>

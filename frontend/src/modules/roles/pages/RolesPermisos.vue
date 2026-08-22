@@ -123,12 +123,12 @@
           <div class="field">
             <label>Alcance</label>
             <select v-model="nuevo.scope">
-              <option value="empresa">Una sede</option>
-              <option value="global_restricted">Todas las sedes (solo lectura/operación)</option>
-              <option value="global">Todas las sedes (super admin)</option>
+              <option value="empresa">Una empresa</option>
+              <option value="global_restricted">Todas las empresas (solo lectura/operación)</option>
+              <option value="global">Todas las empresas (super admin)</option>
             </select>
             <small class="muted">
-              Los roles globales no se anclan a una sede: sus usuarios ven toda la cadena.
+              Los roles globales no se anclan a una empresa: sus usuarios ven todas.
             </small>
           </div>
           <div class="field">
@@ -172,7 +172,7 @@ const totalPermisos = computed(() =>
 const esSuperAdmin = computed(() => sel.value?.codigo === "super_admin");
 
 function labelScope(s) {
-  return { global: "Global", global_restricted: "Global (lectura)", empresa: "Sede" }[s] || s;
+  return { global: "Global", global_restricted: "Global (lectura)", empresa: "Empresa" }[s] || s;
 }
 
 function seleccionar(r) {

@@ -1,30 +1,27 @@
 # Modelo de datos
 
-60 tablas en `core`, repartidas entre lo que es común a toda la cadena y lo que
-pertenece a una sede.
+60 tablas en `core`. **46 llevan `empresa_id`**: cada empresa es un negocio
+independiente y no ve el dato de las demás.
 
-## Client-global (sin `empresa_id`)
+## Sin `empresa_id` (compartido por todas las empresas)
 
-Comparten todas las sedes:
-
-| Tabla | Notas |
+| Tabla | Por qué es compartida |
 |---|---|
-| `empresas` | Cada fila es una sede. El multi-tenancy se resuelve por `empresa_id`. |
-| `roles`, `permisos`, `rol_permisos` | El `scope` del rol define el alcance del usuario. |
-| `users` | Staff. Los veterinarios llevan `colegiatura` (obligatoria por CHECK). |
-| `clientes` | Propietarios. La cartera es de la cadena: el mismo dueño en cualquier sede. |
-| `especies`, `razas` | Catálogo maestro con peso de referencia y esperanza de vida. |
-| `mascotas` | Pacientes. Historia clínica única en toda la cadena. |
-| `audit_log`, `correlativos`, `sesiones`, `notificaciones` | Transversales. |
+| `empresas` | Cada fila es una empresa. Es la raíz del multi-tenancy. |
+| `roles`, `permisos`, `rol_permisos` | Modelo de identidad del sistema, no dato de negocio. El `scope` del rol define el alcance del usuario. |
+| `users` | Staff. `empresa_id` es NULL solo para los roles globales. Los veterinarios llevan `colegiatura` (obligatoria por CHECK). |
+| `especies`, `razas`, `especializaciones` | Taxonomía de referencia. Solo la edita el super admin: es el catálogo del operador del ERP. |
+| `audit_log`, `correlativos`, `sesiones`, `notificaciones` | Infraestructura transversal. |
 
-**Por qué clientes y mascotas son globales**: un propietario que va a otra sede es el
-mismo propietario, y su mascota llega con su historia. Duplicar el registro por sede
-obligaría a reconciliar dos historias clínicas del mismo animal.
+Las tablas de detalle (`comprobante_items`, `citas_historial`, `pago_aplicaciones`,
+`orden_compra_items`, `proveedor_contactos`, `hospitalizacion_evoluciones`) tampoco
+la llevan: cuelgan por FK de un padre que sí la tiene y se borran en cascada con él.
 
-## Por sede (`empresa_id`)
+## Con `empresa_id`
 
 | Dominio | Tablas |
 |---|---|
+| Cartera | `clientes`, `mascotas`, `mascotas_extraviadas` |
 | Catálogos | `categorias`, `servicios`, `esquemas_vacunacion`, `horarios_atencion`, `consultorios`, `clausulas` |
 | Agenda | `citas`, `citas_historial`, `citas_lista_espera` |
 | Historia clínica | `historia_clinica`, `consultas`, `vacunas`, `desparasitaciones`, `tratamientos`, `cirugias`, `hospitalizaciones`, `hospitalizacion_evoluciones`, `examenes`, `notas_medicas`, `documentos_medicos`, `ordenes_servicio` |
@@ -40,6 +37,15 @@ obligaría a reconciliar dos historias clínicas del mismo animal.
 **`historia_clinica` como índice de eventos.** No duplica el contenido: guarda tipo,
 fecha, título, resumen y el `entidad_id` de la fila real. Ver el detalle es ir a la
 tabla específica; ver la historia es leer solo esta.
+
+**El documento del propietario es único por empresa, no globalmente.**
+`UNIQUE (empresa_id, tipo_documento, numero_documento)`. La misma persona puede ser
+cliente de dos empresas con una ficha distinta en cada una. El microchip sigue la
+misma regla. Ver [ADR-002](../decisions/002-cartera-por-empresa.md).
+
+**`mascotas.empresa_id` se hereda del propietario dentro del SP**, nunca del payload.
+Eso hace imposible que una mascota quede en una empresa distinta a la de su dueño,
+incluso si alguien manipula la petición.
 
 **`ordenes_servicio` separa el acto de la factura.** Un servicio prestado existe
 aunque todavía no se cobre. Al facturar se marca `facturado = true`; al anular el

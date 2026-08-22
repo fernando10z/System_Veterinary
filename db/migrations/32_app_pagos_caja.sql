@@ -37,6 +37,13 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'pagos:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['cliente_id','monto']);
 
+  IF NOT EXISTS (SELECT 1 FROM core.clientes
+                  WHERE id = (p_payload->>'cliente_id')::uuid AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Cliente no encontrado','cliente_id'));
+  END IF;
+
   IF v_monto <= 0 THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('VALIDATION_ERROR','El monto debe ser mayor a cero','monto'));
@@ -46,7 +53,13 @@ BEGIN
   SELECT id INTO v_caja FROM core.cajas
    WHERE empresa_id = v_emp AND user_apertura_id = p_user_id AND estado = 'abierta'
    LIMIT 1;
-  v_caja := COALESCE(NULLIF(p_payload->>'caja_id','')::uuid, v_caja);
+  -- Una caja de otra empresa no sirve: se ignora si no es de la nuestra.
+  IF NULLIF(p_payload->>'caja_id','') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM core.cajas
+                  WHERE id = (p_payload->>'caja_id')::uuid
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    v_caja := (p_payload->>'caja_id')::uuid;
+  END IF;
 
   INSERT INTO core.pagos (
     empresa_id, cliente_id, caja_id, numero, metodo, monto, moneda,
@@ -66,7 +79,12 @@ BEGIN
   IF jsonb_array_length(v_aplic) > 0 THEN
     FOR v_item IN SELECT * FROM jsonb_array_elements(v_aplic) LOOP
       SELECT saldo_pendiente INTO v_saldo FROM core.comprobantes
-       WHERE id = (v_item->>'comprobante_id')::uuid;
+       WHERE id = (v_item->>'comprobante_id')::uuid AND deleted_at IS NULL
+         AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id);
+
+      IF v_saldo IS NULL THEN
+        RAISE EXCEPTION 'Comprobante no encontrado' USING ERRCODE = 'P0001';
+      END IF;
 
       IF (v_item->>'monto')::numeric > v_saldo THEN
         RAISE EXCEPTION 'El monto aplicado (%) supera el saldo del comprobante (%)',
@@ -140,7 +158,10 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'pagos:anular');
 
-  SELECT * INTO v_pago FROM core.pagos WHERE id = p_id;
+  SELECT * INTO v_pago FROM core.pagos
+   WHERE id = p_id
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Pago no encontrado'));
@@ -307,6 +328,14 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'caja:operar');
   PERFORM internal.validar_payload(p_payload, ARRAY['tipo','concepto','monto']);
 
+  IF v_caja IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM core.cajas
+                      WHERE id = v_caja
+                        AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Caja no encontrada','caja_id'));
+  END IF;
+
   IF v_caja IS NULL THEN
     SELECT id INTO v_caja FROM core.cajas
      WHERE empresa_id = v_emp AND user_apertura_id = p_user_id AND estado = 'abierta' LIMIT 1;
@@ -361,7 +390,10 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'caja:operar');
 
-  SELECT * INTO v_caja FROM core.cajas WHERE id = p_id;
+  SELECT * INTO v_caja FROM core.cajas
+   WHERE id = p_id
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Caja no encontrada'));

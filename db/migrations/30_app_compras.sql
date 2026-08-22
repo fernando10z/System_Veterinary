@@ -125,6 +125,13 @@ BEGIN
       p_payload->>'observaciones', p_user_id
     ) RETURNING id INTO v_id;
   ELSE
+    IF NOT EXISTS (SELECT 1 FROM core.proveedores
+                    WHERE id = v_id AND deleted_at IS NULL
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Proveedor no encontrado'));
+    END IF;
+
     UPDATE core.proveedores SET
       razon_social     = COALESCE(p_payload->>'razon_social', razon_social),
       nombre_comercial = COALESCE(p_payload->>'nombre_comercial', nombre_comercial),
@@ -170,14 +177,34 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'compras:gestionar');
 
+  -- El contacto cuelga del proveedor: basta con validar que el proveedor
+  -- (nuevo contacto) o el contacto existente sean de la empresa.
   IF v_id IS NULL THEN
     PERFORM internal.validar_payload(p_payload, ARRAY['proveedor_id','nombres']);
+    IF NOT EXISTS (SELECT 1 FROM core.proveedores pv
+                    WHERE pv.id = (p_payload->>'proveedor_id')::uuid AND pv.deleted_at IS NULL
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+                            internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin),
+                            pv.empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Proveedor no encontrado','proveedor_id'));
+    END IF;
     INSERT INTO core.proveedor_contactos (proveedor_id, nombres, cargo, telefono, correo, es_principal)
     VALUES ((p_payload->>'proveedor_id')::uuid, p_payload->>'nombres', p_payload->>'cargo',
             p_payload->>'telefono', lower(NULLIF(p_payload->>'correo','')),
             COALESCE((p_payload->>'es_principal')::boolean, false))
     RETURNING id INTO v_id;
   ELSE
+    IF NOT EXISTS (SELECT 1 FROM core.proveedor_contactos c
+                    JOIN core.proveedores pv ON pv.id = c.proveedor_id
+                    WHERE c.id = v_id
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+                            internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin),
+                            pv.empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Contacto no encontrado'));
+    END IF;
+
     UPDATE core.proveedor_contactos SET
       nombres      = COALESCE(p_payload->>'nombres', nombres),
       cargo        = COALESCE(p_payload->>'cargo', cargo),
@@ -207,8 +234,16 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_ordenes INT;
+  v_emp     UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'compras:gestionar');
+
+  IF NOT EXISTS (SELECT 1 FROM core.proveedores
+                  WHERE id = p_id AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Proveedor no encontrado'));
+  END IF;
 
   SELECT count(*) INTO v_ordenes FROM core.ordenes_compra
    WHERE proveedor_id = p_id AND deleted_at IS NULL;
@@ -257,6 +292,13 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'compras:gestionar');
   PERFORM internal.validar_payload(p_payload, ARRAY['proveedor_id','items']);
+
+  IF NOT EXISTS (SELECT 1 FROM core.proveedores
+                  WHERE id = (p_payload->>'proveedor_id')::uuid AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Proveedor no encontrado','proveedor_id'));
+  END IF;
 
   IF jsonb_array_length(p_payload->'items') = 0 THEN
     RETURN jsonb_build_object('ok', false,
@@ -344,7 +386,10 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'compras:recibir');
 
-  SELECT * INTO v_oc FROM core.ordenes_compra WHERE id = p_id AND deleted_at IS NULL;
+  SELECT * INTO v_oc FROM core.ordenes_compra
+   WHERE id = p_id AND deleted_at IS NULL
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Orden de compra no encontrada'));
@@ -508,7 +553,10 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'compras:gestionar');
 
-  SELECT estado INTO v_actual FROM core.ordenes_compra WHERE id = p_id AND deleted_at IS NULL;
+  SELECT estado INTO v_actual FROM core.ordenes_compra
+   WHERE id = p_id AND deleted_at IS NULL
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Orden de compra no encontrada'));
@@ -556,13 +604,26 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'compras:pagar');
   PERFORM internal.validar_payload(p_payload, ARRAY['proveedor_id','monto']);
 
+  IF NOT EXISTS (SELECT 1 FROM core.proveedores
+                  WHERE id = (p_payload->>'proveedor_id')::uuid AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Proveedor no encontrado','proveedor_id'));
+  END IF;
+
   IF v_monto <= 0 THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('VALIDATION_ERROR','El monto debe ser mayor a cero','monto'));
   END IF;
 
   IF v_oc IS NOT NULL THEN
-    SELECT saldo_pendiente INTO v_saldo FROM core.ordenes_compra WHERE id = v_oc;
+    SELECT saldo_pendiente INTO v_saldo FROM core.ordenes_compra
+     WHERE id = v_oc AND deleted_at IS NULL
+       AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id);
+    IF v_saldo IS NULL THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Orden de compra no encontrada','orden_compra_id'));
+    END IF;
     IF v_monto > v_saldo THEN
       RETURN jsonb_build_object('ok', false,
         'error', internal.error_jsonb('BUSINESS_RULE',

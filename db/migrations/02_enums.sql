@@ -22,9 +22,9 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Alcance de visibilidad del rol. Réplica del modelo del ERP:
---   global            → super admin, ve todas las sedes
---   global_restricted → gerencia/contabilidad, ven todas las sedes sin privilegios de super admin
---   empresa           → personal de una sede concreta
+--   global            → super admin, ve todas las empresas
+--   global_restricted → gerencia/contabilidad, ven todas las empresas sin privilegios de super admin
+--   empresa           → personal de una empresa concreta
 DO $$ BEGIN
   CREATE TYPE core.scope_rol AS ENUM ('global','global_restricted','empresa');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;

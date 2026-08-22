@@ -1,12 +1,12 @@
 -- =============================================================================
--- 21_app_empresas.sql — Sedes / clínicas de la cadena
+-- 21_app_empresas.sql — Empresas (cada una es un negocio independiente)
 -- =============================================================================
 
 SET search_path = app, internal, core, public;
 
 -- -----------------------------------------------------------------------------
 -- app.fn_empresa_listar
--- Un usuario con acceso global ve todas las sedes; el resto solo la suya.
+-- Un usuario con acceso global ve todas las empresas; el resto solo la suya.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.fn_empresa_listar(
   p_user_id        UUID,
@@ -79,7 +79,7 @@ BEGIN
 
   IF v_data IS NULL THEN
     RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('NOT_FOUND','Sede no encontrada'));
+      'error', internal.error_jsonb('NOT_FOUND','Empresa no encontrada'));
   END IF;
 
   RETURN jsonb_build_object('ok', true, 'data', v_data);
@@ -91,7 +91,8 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- app.sp_empresa_crear — solo super admin
--- Autoprovisiona lo mínimo para operar: almacén principal y series por defecto.
+-- Autoprovisiona lo mínimo para operar: almacén principal y un consultorio.
+-- No hereda catálogo de otras empresas: son negocios independientes.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.sp_empresa_crear(
   p_user_id        UUID,
@@ -110,7 +111,7 @@ DECLARE
 BEGIN
   IF NOT p_is_super_admin THEN
     RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('FORBIDDEN','Solo un super administrador puede crear sedes'));
+      'error', internal.error_jsonb('FORBIDDEN','Solo un super administrador puede crear empresas'));
   END IF;
 
   PERFORM internal.validar_payload(p_payload, ARRAY['ruc','razon_social']);
@@ -122,7 +123,7 @@ BEGIN
 
   IF EXISTS (SELECT 1 FROM core.empresas WHERE ruc = v_ruc AND deleted_at IS NULL) THEN
     RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('CONFLICT','Ya existe una sede con ese RUC','ruc'));
+      'error', internal.error_jsonb('CONFLICT','Ya existe una empresa con ese RUC','ruc'));
   END IF;
 
   INSERT INTO core.empresas (
@@ -189,7 +190,7 @@ BEGIN
 
   IF v_antes IS NULL THEN
     RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('NOT_FOUND','Sede no encontrada'));
+      'error', internal.error_jsonb('NOT_FOUND','Empresa no encontrada'));
   END IF;
 
   UPDATE core.empresas SET

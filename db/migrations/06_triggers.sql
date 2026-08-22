@@ -40,8 +40,8 @@ END $$;
 
 -- -----------------------------------------------------------------------------
 -- users: el scope del rol determina si empresa_id debe ser NULL o NOT NULL.
--- Réplica de la regla del ERP: un rol global/global_restricted ve todas las
--- sedes, así que NO puede estar anclado a una.
+-- Un rol global/global_restricted ve todas las empresas, así que NO puede
+-- estar anclado a una.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION core.trg_users_validate_rol_scope()
 RETURNS TRIGGER
@@ -57,12 +57,12 @@ BEGIN
   SELECT scope INTO v_scope FROM core.roles WHERE id = NEW.rol_id;
 
   IF v_scope IN ('global','global_restricted') AND NEW.empresa_id IS NOT NULL THEN
-    RAISE EXCEPTION 'Un rol con alcance % no puede estar asignado a una sede concreta', v_scope
+    RAISE EXCEPTION 'Un rol con alcance % no puede estar asignado a una empresa concreta', v_scope
       USING ERRCODE = 'P0001';
   END IF;
 
   IF v_scope = 'empresa' AND NEW.empresa_id IS NULL THEN
-    RAISE EXCEPTION 'Un rol con alcance de sede requiere empresa_id'
+    RAISE EXCEPTION 'Un rol con alcance de empresa requiere empresa_id'
       USING ERRCODE = 'P0001';
   END IF;
 

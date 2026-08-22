@@ -1,5 +1,5 @@
 -- =============================================================================
--- 40_app_dashboard.sql — Panel de control de la sede
+-- 40_app_dashboard.sql — Panel de control de la empresa
 -- =============================================================================
 
 SET search_path = app, internal, core, public;
@@ -85,14 +85,18 @@ BEGIN
     'pacientes', (
       SELECT jsonb_build_object(
         'total_activos', (SELECT count(*) FROM core.mascotas m
-                           WHERE m.deleted_at IS NULL AND m.estado = 'activo'),
+                           WHERE m.deleted_at IS NULL AND m.estado = 'activo'
+                             AND (v_global OR m.empresa_id = v_emp)),
         'nuevos',        (SELECT count(*) FROM core.mascotas m
                            WHERE m.deleted_at IS NULL
+                             AND (v_global OR m.empresa_id = v_emp)
                              AND m.created_at::date BETWEEN v_desde AND v_hasta),
         'clientes_activos', (SELECT count(*) FROM core.clientes c
-                              WHERE c.deleted_at IS NULL AND c.estado = 'activo'),
+                              WHERE c.deleted_at IS NULL AND c.estado = 'activo'
+                                AND (v_global OR c.empresa_id = v_emp)),
         'clientes_nuevos',  (SELECT count(*) FROM core.clientes c
                               WHERE c.deleted_at IS NULL
+                                AND (v_global OR c.empresa_id = v_emp)
                                 AND c.created_at::date BETWEEN v_desde AND v_hasta))),
 
     -- ---- Alertas que exigen acción ----
@@ -148,6 +152,7 @@ BEGIN
         FROM core.mascotas m
         JOIN core.especies e ON e.id = m.especie_id
         WHERE m.deleted_at IS NULL AND m.estado = 'activo'
+          AND (v_global OR m.empresa_id = v_emp)
         GROUP BY e.nombre, e.icono
         ORDER BY pacientes DESC) t)
   ));
@@ -212,7 +217,9 @@ SET search_path = core, app, internal, public
 AS $$
 BEGIN
   UPDATE core.recordatorios SET completado = true, enviado_at = COALESCE(enviado_at, now())
-   WHERE id = p_id;
+   WHERE id = p_id
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,

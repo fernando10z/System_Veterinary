@@ -200,11 +200,11 @@
     <template v-else>
       <div class="rep-cols">
         <TablaReporte
-          titulo="Comparativo por sede"
+          titulo="Comparativo por empresa"
           :icono="Building2"
-          :filas="ejecutivo.por_sede ?? []"
+          :filas="ejecutivo.por_empresa ?? []"
           :columnas="[
-            { k: 'sede', l: 'Sede' },
+            { k: 'empresa', l: 'Empresa' },
             { k: 'citas', l: 'Citas', num: true },
             { k: 'facturado', l: 'Facturado', num: true, money: true },
             { k: 'por_cobrar', l: 'Por cobrar', num: true, money: true },

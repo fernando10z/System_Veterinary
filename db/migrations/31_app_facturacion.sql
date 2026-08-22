@@ -200,7 +200,9 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
   PERFORM internal.validar_payload(p_payload, ARRAY['cliente_id']);
 
-  SELECT * INTO v_cli FROM core.clientes WHERE id = v_cliente AND deleted_at IS NULL;
+  SELECT * INTO v_cli FROM core.clientes
+   WHERE id = v_cliente AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Cliente no encontrado','cliente_id'));
@@ -225,7 +227,7 @@ BEGIN
   v_tasa  := COALESCE(v_tasa, 0.18);
   v_serie := COALESCE(NULLIF(p_payload->>'serie',''), v_serie);
 
-  -- Si no vienen ítems, se toma todo lo pendiente del cliente en esta sede.
+  -- Si no vienen ítems, se toma todo lo pendiente del cliente en esta empresa.
   IF jsonb_array_length(v_items) = 0 THEN
     SELECT COALESCE(
       (SELECT jsonb_agg(jsonb_build_object(
@@ -376,7 +378,10 @@ BEGIN
       'error', internal.error_jsonb('VALIDATION_ERROR','Indica el motivo de la anulación','motivo'));
   END IF;
 
-  SELECT * INTO v_c FROM core.comprobantes WHERE id = p_id AND deleted_at IS NULL;
+  SELECT * INTO v_c FROM core.comprobantes
+   WHERE id = p_id AND deleted_at IS NULL
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Comprobante no encontrado'));
@@ -444,7 +449,9 @@ BEGIN
     sunat_codigo  = COALESCE(p_payload->>'sunat_codigo', sunat_codigo),
     sunat_mensaje = COALESCE(p_payload->>'sunat_mensaje', sunat_mensaje),
     updated_by    = p_user_id
-  WHERE id = p_id AND deleted_at IS NULL;
+  WHERE id = p_id AND deleted_at IS NULL
+    AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+          internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,

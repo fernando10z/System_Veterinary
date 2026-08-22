@@ -151,6 +151,13 @@ BEGIN
                            'observaciones', 'Stock inicial al crear el producto'));
     END IF;
   ELSE
+    IF NOT EXISTS (SELECT 1 FROM core.productos
+                    WHERE id = v_id AND deleted_at IS NULL
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Producto no encontrado'));
+    END IF;
+
     UPDATE core.productos SET
       codigo_barras    = COALESCE(NULLIF(p_payload->>'codigo_barras',''), codigo_barras),
       nombre           = COALESCE(p_payload->>'nombre', nombre),
@@ -211,6 +218,13 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'inventario:mover');
   PERFORM internal.validar_payload(p_payload, ARRAY['producto_id','tipo','motivo','cantidad']);
+
+  IF NOT EXISTS (SELECT 1 FROM core.productos
+                  WHERE id = (p_payload->>'producto_id')::uuid AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Producto no encontrado','producto_id'));
+  END IF;
 
   v_id := internal.mover_stock(
     v_emp,
@@ -406,6 +420,13 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'inventario:gestionar');
   PERFORM internal.validar_payload(p_payload, ARRAY['producto_id','numero_lote','cantidad']);
 
+  IF NOT EXISTS (SELECT 1 FROM core.productos
+                  WHERE id = (p_payload->>'producto_id')::uuid AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Producto no encontrado','producto_id'));
+  END IF;
+
   INSERT INTO core.lotes (empresa_id, producto_id, numero_lote, fecha_vencimiento, cantidad, costo_unitario)
   VALUES (v_emp, (p_payload->>'producto_id')::uuid, p_payload->>'numero_lote',
           NULLIF(p_payload->>'fecha_vencimiento','')::date,
@@ -446,8 +467,16 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_movs INT;
+  v_emp  UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'inventario:gestionar');
+
+  IF NOT EXISTS (SELECT 1 FROM core.productos
+                  WHERE id = p_id AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Producto no encontrado'));
+  END IF;
 
   SELECT count(*) INTO v_movs FROM core.movimientos_inventario WHERE producto_id = p_id;
   IF v_movs > 0 THEN

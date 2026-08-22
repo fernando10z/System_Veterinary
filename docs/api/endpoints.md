@@ -28,7 +28,7 @@ Salvo las marcadas como públicas, todas exigen `Authorization: Bearer <accessTo
 | GET | `/mascotas` · `/mascotas/:id` | Ficha con vacunas, tratamientos, curva de peso. |
 | GET | `/mascotas/:id/historia` | Línea de tiempo; `tipo` la filtra. |
 | GET | `/mascotas/:id/vacunas` | Carné con estado de cada refuerzo. |
-| GET | `/clientes` · `/clientes/buscar` · `/clientes/:id` | `buscar` también encuentra por nombre de mascota. |
+| GET | `/clientes` · `/clientes/buscar` · `/clientes/:id` | Solo la cartera de la empresa del usuario. `buscar` también encuentra por nombre de mascota. |
 | POST | `/clientes/:id/portal` | Activa el acceso del propietario. |
 | POST | `/clinico/consultas` · PATCH `/clinico/consultas/:id` · PATCH `/clinico/consultas/:id/cerrar` | Cerrar exige diagnóstico y completa la cita. |
 | POST | `/clinico/vacunas` · `/clinico/desparasitaciones` · `/clinico/tratamientos` | |
@@ -64,7 +64,7 @@ Requieren el token del portal.
 |---|---|
 | GET | `/portal/mis-mascotas` · `/portal/mis-citas` · `/portal/mis-comprobantes` |
 | GET | `/portal/mascotas/:id/historial` |
-| POST | `/portal/citas` · `/portal/cambiar-password` |
+| POST | `/portal/citas` · `/portal/cambiar-password` | La empresa de la cita la fija el SP desde el propietario; no se acepta en el cuerpo. |
 
 ## Archivos
 
@@ -80,7 +80,7 @@ Requieren el token del portal.
 |---|---|---|
 | `VALIDATION_ERROR` | 422 | Falta un campo o el valor no es válido |
 | `BUSINESS_RULE` | 422 | Una regla de negocio lo impide |
-| `NOT_FOUND` | 404 | El registro no existe o no es visible |
+| `NOT_FOUND` | 404 | El registro no existe, o pertenece a otra empresa (no se revela cuál de las dos) |
 | `FORBIDDEN` | 403 | Sin permiso o sin acceso a la sede |
 | `UNAUTHORIZED` | 401 | Token ausente, inválido o expirado |
 | `CONFLICT` | 409 | Duplicado (documento, código, caja abierta) |

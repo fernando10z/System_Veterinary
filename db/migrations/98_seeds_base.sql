@@ -57,7 +57,7 @@ INSERT INTO core.permisos (codigo, modulo, accion, descripcion) VALUES
   ('usuarios:eliminar',    'usuarios',    'eliminar',   'Eliminar usuarios'),
   ('usuarios:asignar_rol', 'usuarios',    'asignar_rol','Cambiar el rol de un usuario'),
   ('auditoria:ver',        'auditoria',   'ver',        'Ver la bitácora del sistema'),
-  ('empresas:gestionar',   'empresas',    'gestionar',  'Administrar sedes')
+  ('empresas:gestionar',   'empresas',    'gestionar',  'Administrar empresas')
 ON CONFLICT (codigo) DO UPDATE
   SET modulo = EXCLUDED.modulo, accion = EXCLUDED.accion, descripcion = EXCLUDED.descripcion;
 
@@ -65,9 +65,9 @@ ON CONFLICT (codigo) DO UPDATE
 -- 2. ROLES
 -- =============================================================================
 INSERT INTO core.roles (codigo, nombre, descripcion, scope, is_sistema) VALUES
-  ('super_admin',  'Super administrador', 'Acceso total a todas las sedes',                  'global',            true),
-  ('gerente',      'Gerencia',            'Visibilidad de toda la cadena, sin administración','global_restricted', true),
-  ('admin_sede',   'Administrador de sede','Gestiona por completo una sede',                  'empresa',           true),
+  ('super_admin',  'Super administrador', 'Acceso total a todas las empresas',                  'global',            true),
+  ('gerente',      'Gerencia',            'Visibilidad de todas las empresas, sin administración','global_restricted', true),
+  ('admin_empresa',   'Administrador de empresa','Gestiona por completo una empresa',                  'empresa',           true),
   ('veterinario',  'Veterinario',         'Atiende pacientes y firma historia clínica',       'empresa',           true),
   ('recepcion',    'Recepción',           'Agenda, clientes y cobros de mostrador',           'empresa',           true),
   ('almacen',      'Almacén',             'Inventario y compras',                            'empresa',           true),
@@ -88,11 +88,11 @@ WHERE r.codigo = 'gerente'
                    'pagos:ver','caja:ver','rrhh:ver','reportes:ver','reportes:ejecutivo',
                    'auditoria:ver');
 
--- Administrador de sede: todo dentro de su sede.
-DELETE FROM core.rol_permisos WHERE rol_id = (SELECT id FROM core.roles WHERE codigo = 'admin_sede');
+-- Administrador de empresa: todo dentro de su empresa.
+DELETE FROM core.rol_permisos WHERE rol_id = (SELECT id FROM core.roles WHERE codigo = 'admin_empresa');
 INSERT INTO core.rol_permisos (rol_id, permiso_id)
 SELECT r.id, p.id FROM core.roles r, core.permisos p
-WHERE r.codigo = 'admin_sede' AND p.codigo <> 'empresas:gestionar';
+WHERE r.codigo = 'admin_empresa' AND p.codigo <> 'empresas:gestionar';
 
 -- Veterinario: clínica y agenda; nada de dinero.
 DELETE FROM core.rol_permisos WHERE rol_id = (SELECT id FROM core.roles WHERE codigo = 'veterinario');
@@ -322,7 +322,7 @@ BEGIN
   VALUES (
     'USR-0002', 'administracion@vetpatitas.pe', crypt('Demo2026!', gen_salt('bf', 10)),
     'Lucía', 'Mendoza', 'Paredes', 'DNI', '10000002', '999000002',
-    v_emp, (SELECT id FROM core.roles WHERE codigo = 'admin_sede'),
+    v_emp, (SELECT id FROM core.roles WHERE codigo = 'admin_empresa'),
     false, NULL, NULL, '#2D7EE5', 'activo')
   ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
   RETURNING id INTO v_admin;
@@ -484,5 +484,56 @@ BEGIN
   WHERE p.empresa_id = v_emp
     AND NOT EXISTS (SELECT 1 FROM core.movimientos_inventario mv WHERE mv.producto_id = p.id);
 
-  RAISE NOTICE 'Seeds base aplicados. Sede principal: %', v_emp;
+  -- ---------------------------------------------------------------------------
+  -- EMPRESA 2: catálogo propio
+  --
+  -- Cada empresa es un negocio independiente: no hereda nada de la primera.
+  -- Se le carga un catálogo mínimo para que sea operable desde el día uno y
+  -- para que la demo muestre el aislamiento con datos reales a ambos lados.
+  -- ---------------------------------------------------------------------------
+  INSERT INTO core.categorias (empresa_id, ambito, codigo, nombre, orden) VALUES
+    (v_emp2, 'servicio', 'CONSULTAS',   'Consultas',           1),
+    (v_emp2, 'servicio', 'PREVENTIVA',  'Medicina preventiva', 2),
+    (v_emp2, 'producto', 'MEDICAMENTO', 'Medicamentos',        1),
+    (v_emp2, 'producto', 'INSUMO',      'Insumos médicos',     2)
+  ON CONFLICT (empresa_id, ambito, codigo) DO NOTHING;
+
+  INSERT INTO core.servicios (empresa_id, codigo, nombre, descripcion, tipo,
+                              precio, costo_estimado, duracion_min, created_by)
+  VALUES
+    (v_emp2, 'SRV-0001', 'Consulta general',       'Evaluación clínica completa', 'consulta',       70.00, 18.00, 30, v_super),
+    (v_emp2, 'SRV-0002', 'Consulta de urgencia',   'Atención inmediata',          'consulta',      140.00, 35.00, 45, v_super),
+    (v_emp2, 'SRV-0003', 'Vacunación antirrábica', 'Aplicación de antirrábica',   'vacunacion',     50.00, 18.00, 15, v_super),
+    (v_emp2, 'SRV-0004', 'Desparasitación',        'Antiparasitario según peso',  'desparasitacion',40.00, 12.00, 10, v_super),
+    (v_emp2, 'SRV-0005', 'Baño medicado',          'Shampoo terapéutico',         'grooming',       65.00, 15.00, 60, v_super)
+  ON CONFLICT (empresa_id, codigo) DO NOTHING;
+
+  INSERT INTO core.productos (empresa_id, codigo, nombre, tipo, presentacion,
+                              unidad_medida, precio_compra, precio_venta,
+                              stock_minimo, created_by)
+  VALUES
+    (v_emp2, 'PRD-0001', 'Vacuna antirrábica canina', 'vacuna',      'Frasco 1 dosis',     'UND', 18.00, 50.00, 15, v_super),
+    (v_emp2, 'PRD-0002', 'Amoxicilina 500 mg',        'medicamento', 'Caja x 20 tabletas', 'CAJA',22.00, 52.00, 10, v_super),
+    (v_emp2, 'PRD-0003', 'Jeringa 5 ml estéril',      'insumo',      'Unidad',             'UND',  0.60,  1.60, 80, v_super),
+    (v_emp2, 'PRD-0004', 'Suero fisiológico 0,9%',    'insumo',      'Bolsa 500 ml',       'UND',  6.50, 16.00, 20, v_super)
+  ON CONFLICT (empresa_id, codigo) DO NOTHING;
+
+  INSERT INTO core.movimientos_inventario (
+    empresa_id, producto_id, almacen_id, tipo, motivo, cantidad, costo_unitario,
+    observaciones, created_by)
+  SELECT v_emp2, p.id,
+         (SELECT id FROM core.almacenes WHERE empresa_id = v_emp2 AND es_principal LIMIT 1),
+         'entrada', 'ajuste_inventario',
+         CASE p.tipo WHEN 'insumo' THEN 100 ELSE 30 END,
+         p.precio_compra, 'Carga inicial de inventario', v_super
+  FROM core.productos p
+  WHERE p.empresa_id = v_emp2
+    AND NOT EXISTS (SELECT 1 FROM core.movimientos_inventario mv WHERE mv.producto_id = p.id);
+
+  -- Horario propio de la segunda empresa
+  DELETE FROM core.horarios_atencion WHERE empresa_id = v_emp2;
+  INSERT INTO core.horarios_atencion (empresa_id, dia_semana, hora_inicio, hora_fin, activo)
+  SELECT v_emp2, d, '10:00'::time, '19:00'::time, true FROM generate_series(1, 5) d;
+
+  RAISE NOTICE 'Seeds base aplicados. Empresa 1: %  ·  Empresa 2: %', v_emp, v_emp2;
 END $$;

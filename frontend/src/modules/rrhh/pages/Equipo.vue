@@ -76,7 +76,7 @@
       <header class="module-panel-head">
         <h2>
           <span class="head-icon"><Users :size="14" /></span>
-          Personal de la sede
+          Personal de la empresa
           <span class="head-meta">{{ equipo.length }}</span>
         </h2>
         <div class="module-panel-head-actions">
@@ -94,7 +94,7 @@
       <div v-if="!cargando && !equipo.length" class="module-panel-body module-empty">
         <div class="empty-icon"><Users :size="22" /></div>
         <h3>Sin personal registrado</h3>
-        <p>Los usuarios de la sede aparecerán aquí con su carga de trabajo.</p>
+        <p>Los usuarios de la empresa aparecerán aquí con su carga de trabajo.</p>
       </div>
 
       <div v-else class="module-panel-body equipo-grid">

@@ -158,7 +158,7 @@
                     <span class="tag">{{ capitalizar(e.tipo_evento) }}</span>
                     <template v-if="e.veterinario"> · {{ e.veterinario }}</template>
                     <template v-if="e.colegiatura"> ({{ e.colegiatura }})</template>
-                    <template v-if="e.sede"> · {{ e.sede }}</template>
+                    <template v-if="e.empresa"> · {{ e.empresa }}</template>
                   </div>
                 </div>
               </div>

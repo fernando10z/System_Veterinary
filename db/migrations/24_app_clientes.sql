@@ -1,13 +1,16 @@
 -- =============================================================================
 -- 24_app_clientes.sql — Propietarios de mascotas + comunicaciones
+--
+-- La cartera es PRIVADA de cada empresa: toda lectura filtra por empresa_id y
+-- toda escritura la fija desde el contexto, nunca desde el payload.
 -- =============================================================================
 
 SET search_path = app, internal, core, public;
 
 -- -----------------------------------------------------------------------------
 -- app.fn_cliente_listar
--- La cartera es global, pero se enriquece con la actividad de la sede activa
--- (nº de mascotas, última visita, deuda pendiente).
+-- Solo los propietarios de la empresa del usuario, enriquecidos con su
+-- actividad (nº de mascotas, última visita, deuda pendiente).
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.fn_cliente_listar(
   p_user_id        UUID,
@@ -36,6 +39,7 @@ BEGIN
   SELECT count(*) INTO v_total
   FROM core.clientes c
   WHERE c.deleted_at IS NULL
+    AND (v_global OR c.empresa_id = v_emp)
     AND (p_filtros->>'estado' IS NULL OR c.estado::text = p_filtros->>'estado')
     AND (p_filtros->>'con_portal' IS NULL
          OR c.portal_acceso = (p_filtros->>'con_portal')::boolean)
@@ -77,6 +81,7 @@ BEGIN
                AND (v_global OR cp.empresa_id = v_emp)) AS deuda_pendiente
     FROM core.clientes c
     WHERE c.deleted_at IS NULL
+      AND (v_global OR c.empresa_id = v_emp)
       AND (p_filtros->>'estado' IS NULL OR c.estado::text = p_filtros->>'estado')
       AND (p_filtros->>'con_portal' IS NULL
            OR c.portal_acceso = (p_filtros->>'con_portal')::boolean)
@@ -165,6 +170,7 @@ BEGIN
                AND (v_global OR cp.empresa_id = v_emp)) AS facturado_historico
     FROM core.clientes c
     WHERE c.id = p_id AND c.deleted_at IS NULL
+      AND (v_global OR c.empresa_id = v_emp)
   ) x;
 
   IF v_data IS NULL THEN
@@ -196,8 +202,10 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_q    TEXT := internal.normalizar(p_query);
-  v_data JSONB;
+  v_global BOOLEAN := internal.es_acceso_global(p_user_id, p_is_super_admin);
+  v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_q      TEXT    := internal.normalizar(p_query);
+  v_data   JSONB;
 BEGIN
   IF v_q IS NULL OR length(v_q) < 2 THEN
     RETURN jsonb_build_object('ok', true, 'data', '[]'::jsonb);
@@ -214,6 +222,7 @@ BEGIN
              WHERE m.cliente_id = c.id AND m.deleted_at IS NULL AND m.estado = 'activo') AS mascotas
     FROM core.clientes c
     WHERE c.deleted_at IS NULL AND c.estado = 'activo'
+      AND (v_global OR c.empresa_id = v_emp)
       AND (internal.normalizar(c.nombres || ' ' || COALESCE(c.apellido_paterno,'') || ' ' ||
                                COALESCE(c.apellido_materno,'')) LIKE '%' || v_q || '%'
            OR c.numero_documento LIKE p_query || '%'
@@ -267,23 +276,33 @@ BEGIN
       'error', internal.error_jsonb('VALIDATION_ERROR','El RUC no es válido','numero_documento'));
   END IF;
 
+  IF v_emp IS NULL THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('VALIDATION_ERROR',
+        'No se pudo determinar la empresa del usuario','empresa_id'));
+  END IF;
+
+  -- El documento es único DENTRO de la empresa. Otra empresa puede tener a la
+  -- misma persona en su cartera: son negocios independientes.
   SELECT id INTO v_existente FROM core.clientes
-   WHERE tipo_documento = v_tipo_doc AND numero_documento = v_doc AND deleted_at IS NULL;
+   WHERE empresa_id = v_emp
+     AND tipo_documento = v_tipo_doc AND numero_documento = v_doc
+     AND deleted_at IS NULL;
 
   IF v_existente IS NOT NULL THEN
-    -- La cartera es de toda la cadena: si ya existe, se devuelve para reutilizar
-    -- en lugar de crear un duplicado en otra sede.
     RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(
-      'CONFLICT', 'Ya existe un cliente con ese documento en la cadena', 'numero_documento')
+      'CONFLICT', 'Ya existe un cliente con ese documento', 'numero_documento')
       || jsonb_build_object('cliente_id', v_existente));
   END IF;
 
   INSERT INTO core.clientes (
-    codigo, tipo_documento, numero_documento, nombres, apellido_paterno, apellido_materno,
+    empresa_id, codigo, tipo_documento, numero_documento,
+    nombres, apellido_paterno, apellido_materno,
     razon_social, telefono, telefono_alterno, correo, direccion, ubigeo,
-    fecha_nacimiento, empresa_origen_id, linea_credito, dias_credito,
+    fecha_nacimiento, linea_credito, dias_credito,
     acepta_marketing, observaciones, created_by
   ) VALUES (
+    v_emp,
     COALESCE(NULLIF(p_payload->>'codigo',''), internal.siguiente_numero(v_emp, 'CLI', 5)),
     v_tipo_doc, v_doc,
     p_payload->>'nombres',
@@ -296,7 +315,6 @@ BEGIN
     p_payload->>'direccion',
     p_payload->>'ubigeo',
     NULLIF(p_payload->>'fecha_nacimiento','')::date,
-    v_emp,
     COALESCE((p_payload->>'linea_credito')::numeric, 0),
     COALESCE((p_payload->>'dias_credito')::int, 0),
     COALESCE((p_payload->>'acepta_marketing')::boolean, true),
@@ -335,8 +353,12 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clientes:editar');
 
+  -- El filtro por empresa va en el SELECT: un cliente de otra empresa se
+  -- comporta como inexistente, sin revelar que existe.
   SELECT to_jsonb(c) - 'portal_password_hash' INTO v_antes
-  FROM core.clientes c WHERE c.id = p_id AND c.deleted_at IS NULL;
+  FROM core.clientes c
+  WHERE c.id = p_id AND c.deleted_at IS NULL
+    AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR c.empresa_id = v_emp);
 
   IF v_antes IS NULL THEN
     RETURN jsonb_build_object('ok', false,
@@ -387,6 +409,8 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
+DECLARE
+  v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clientes:editar');
 
@@ -400,7 +424,8 @@ BEGIN
      SET portal_acceso = true,
          portal_password_hash = crypt(p_password, gen_salt('bf', 10)),
          updated_by = p_user_id
-   WHERE id = p_id AND deleted_at IS NULL;
+   WHERE id = p_id AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
@@ -408,7 +433,7 @@ BEGIN
   END IF;
 
   PERFORM internal.registrar_auditoria(
-    p_user_id, p_empresa_id, 'activar_portal', 'clientes', p_id);
+    p_user_id, v_emp, 'activar_portal', 'clientes', p_id);
 
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', p_id, 'portal_acceso', true));
 
@@ -433,8 +458,17 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_citas INT;
+  v_emp   UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clientes:eliminar');
+
+  IF NOT EXISTS (SELECT 1 FROM core.clientes
+                  WHERE id = p_id AND deleted_at IS NULL
+                    AND (internal.es_acceso_global(p_user_id, p_is_super_admin)
+                         OR empresa_id = v_emp)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Cliente no encontrado'));
+  END IF;
 
   SELECT count(*) INTO v_citas FROM core.citas WHERE cliente_id = p_id AND deleted_at IS NULL;
 

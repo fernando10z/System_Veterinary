@@ -3,7 +3,7 @@
     <PageHeader
       eyebrow="Medicina preventiva"
       title="Vacunación"
-      subtitle="Refuerzos pendientes y protocolos de la sede"
+      subtitle="Refuerzos pendientes y protocolos de la empresa"
     >
       <template #actions>
         <button class="btn" :disabled="cargando" @click="cargar">

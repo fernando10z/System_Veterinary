@@ -35,7 +35,7 @@
         <div class="stat">
           <div class="stat-label">Facturado histórico <span class="icon-tile"><Receipt :size="14" /></span></div>
           <div class="stat-val">{{ fmtSoles(c.facturado_historico) }}</div>
-          <div class="stat-meta">acumulado en la sede</div>
+          <div class="stat-meta">acumulado en la empresa</div>
         </div>
         <div class="stat">
           <div class="stat-label">Deuda pendiente <span class="icon-tile amber"><CreditCard :size="14" /></span></div>

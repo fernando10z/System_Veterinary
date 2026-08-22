@@ -78,7 +78,7 @@ onMounted(async () => {
     const r = await empresasApi.actual();
     empresa.value = r.data;
   } catch {
-    // Un super admin sin sede asignada no rompe el sidebar: se usa el nombre por defecto.
+    // Un super admin sin empresa asignada no rompe el sidebar: usa el nombre por defecto.
   }
 });
 </script>

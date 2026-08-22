@@ -1,10 +1,145 @@
 -- =============================================================================
 -- 04_tables_per_empresa.sql
--- Tablas con empresa_id: la operación de cada sede (agenda, historia clínica,
--- inventario, compras, facturación, caja, personal).
+-- Tablas con empresa_id: TODO el dato de negocio.
+--
+-- Cada empresa es un negocio independiente. Su cartera de propietarios, sus
+-- pacientes, su agenda, su historia clínica, su inventario, sus compras, su
+-- facturación y su caja son suyos y no los ve ninguna otra empresa.
+--
+-- El aislamiento no se resuelve en la UI ni en el backend: cada función de
+-- lectura filtra con
+--     (internal.es_acceso_global(p_user_id, p_is_super_admin) OR x.empresa_id = v_emp)
+-- así que un bug en el cliente no puede exponer datos de otra empresa.
 -- =============================================================================
 
 SET search_path = core, public;
+
+-- =============================================================================
+-- CARTERA: PROPIETARIOS Y PACIENTES
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- clientes — propietarios de mascotas
+--
+-- El documento es único DENTRO de cada empresa, no globalmente: dos negocios
+-- independientes pueden atender a la misma persona sin verse entre sí, y cada
+-- uno mantiene su propia ficha.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.clientes (
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id             UUID NOT NULL REFERENCES core.empresas(id) ON DELETE RESTRICT,
+  codigo                 VARCHAR(20),
+  tipo_documento         core.tipo_documento_identidad NOT NULL DEFAULT 'DNI',
+  numero_documento       VARCHAR(20) NOT NULL,
+  nombres                VARCHAR(150) NOT NULL,
+  apellido_paterno       VARCHAR(100),
+  apellido_materno       VARCHAR(100),
+  razon_social           VARCHAR(255),          -- si factura a nombre de empresa (RUC)
+  telefono               VARCHAR(30),
+  telefono_alterno       VARCHAR(30),
+  correo                 VARCHAR(150),
+  direccion              TEXT,
+  ubigeo                 VARCHAR(6),
+  fecha_nacimiento       DATE,
+  -- Comercial
+  linea_credito          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  dias_credito           INT NOT NULL DEFAULT 0,
+  acepta_marketing       BOOLEAN NOT NULL DEFAULT true,
+  -- Portal del propietario
+  portal_acceso          BOOLEAN NOT NULL DEFAULT false,
+  portal_password_hash   TEXT,
+  portal_ultimo_login_at TIMESTAMPTZ,
+  estado                 core.estado_cliente NOT NULL DEFAULT 'activo',
+  observaciones          TEXT,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at             TIMESTAMPTZ,
+  created_by             UUID,
+  updated_by             UUID,
+  CONSTRAINT uq_clientes_documento UNIQUE (empresa_id, tipo_documento, numero_documento)
+);
+CREATE INDEX IF NOT EXISTS ix_clientes_empresa    ON core.clientes (empresa_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_clientes_estado     ON core.clientes (empresa_id, estado) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_clientes_nombre_trgm ON core.clientes USING gin (nombres gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS ix_clientes_doc_trgm   ON core.clientes USING gin (numero_documento gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS ix_clientes_telefono   ON core.clientes (telefono);
+
+COMMENT ON TABLE core.clientes IS
+  'Propietarios de mascotas. Cartera privada de cada empresa.';
+
+-- -----------------------------------------------------------------------------
+-- mascotas — los pacientes
+--
+-- empresa_id se hereda del propietario y lo fija el SP: una mascota no puede
+-- pertenecer a una empresa distinta de la de su dueño.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.mascotas (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id          UUID NOT NULL REFERENCES core.empresas(id) ON DELETE RESTRICT,
+  codigo              VARCHAR(20),               -- historia clínica: HC-000001
+  cliente_id          UUID NOT NULL REFERENCES core.clientes(id) ON DELETE RESTRICT,
+  nombre              VARCHAR(100) NOT NULL,
+  especie_id          UUID NOT NULL REFERENCES core.especies(id),
+  raza_id             UUID REFERENCES core.razas(id),
+  raza_libre          VARCHAR(120),              -- cuando la raza no está en catálogo (mestizo)
+  sexo                core.sexo_mascota NOT NULL DEFAULT 'desconocido',
+  color               VARCHAR(80),
+  senias_particulares TEXT,
+  fecha_nacimiento    DATE,
+  edad_aproximada_meses INT,                     -- cuando no se conoce la fecha exacta
+  peso_kg             NUMERIC(6,2),              -- último peso registrado (denormalizado)
+  tamanio             core.tamanio_mascota,
+  esterilizado        BOOLEAN NOT NULL DEFAULT false,
+  fecha_esterilizacion DATE,
+  microchip           VARCHAR(40),
+  num_placa           VARCHAR(40),
+  foto_url            TEXT,
+  -- Alertas clínicas: se muestran en rojo en cada atención
+  alergias            TEXT,
+  condiciones_cronicas TEXT,
+  observaciones       TEXT,
+  estado              core.estado_mascota NOT NULL DEFAULT 'activo',
+  fecha_fallecimiento DATE,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at          TIMESTAMPTZ,
+  created_by          UUID,
+  updated_by          UUID,
+  CONSTRAINT ck_mascotas_microchip_unico CHECK (microchip IS NULL OR length(microchip) >= 8)
+);
+CREATE INDEX IF NOT EXISTS ix_mascotas_empresa  ON core.mascotas (empresa_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_mascotas_cliente  ON core.mascotas (cliente_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_mascotas_especie  ON core.mascotas (especie_id);
+CREATE INDEX IF NOT EXISTS ix_mascotas_estado   ON core.mascotas (empresa_id, estado) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_mascotas_nombre_trgm ON core.mascotas USING gin (nombre gin_trgm_ops);
+
+-- El microchip es único dentro de la empresa. Globalmente no puede serlo: dos
+-- negocios independientes pueden atender al mismo animal y cada uno lo registra.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mascotas_microchip
+  ON core.mascotas (empresa_id, microchip) WHERE microchip IS NOT NULL AND deleted_at IS NULL;
+
+COMMENT ON TABLE core.mascotas IS
+  'Pacientes. Pertenecen a una empresa a través de su propietario.';
+
+-- -----------------------------------------------------------------------------
+-- mascotas_extraviadas — reporte de mascota perdida / encontrada
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.mascotas_extraviadas (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id      UUID NOT NULL REFERENCES core.empresas(id) ON DELETE CASCADE,
+  mascota_id      UUID NOT NULL REFERENCES core.mascotas(id) ON DELETE CASCADE,
+  fecha_extravio  DATE NOT NULL,
+  zona            VARCHAR(255),
+  descripcion     TEXT,
+  contacto        VARCHAR(150),
+  recompensa      NUMERIC(12,2),
+  encontrado      BOOLEAN NOT NULL DEFAULT false,
+  fecha_hallazgo  DATE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by      UUID
+);
+CREATE INDEX IF NOT EXISTS ix_mascotas_extraviadas ON core.mascotas_extraviadas (empresa_id, mascota_id);
 
 -- =============================================================================
 -- CATÁLOGOS OPERATIVOS POR SEDE
@@ -30,7 +165,7 @@ CREATE TABLE IF NOT EXISTS core.categorias (
 CREATE INDEX IF NOT EXISTS ix_categorias_empresa ON core.categorias (empresa_id, ambito) WHERE estado = 'activo';
 
 -- -----------------------------------------------------------------------------
--- servicios — catálogo clínico y comercial de la sede
+-- servicios — catálogo clínico y comercial de la empresa
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS core.servicios (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -81,7 +216,7 @@ CREATE TABLE IF NOT EXISTS core.esquemas_vacunacion (
 CREATE INDEX IF NOT EXISTS ix_esquemas_vac_empresa ON core.esquemas_vacunacion (empresa_id, especie_id);
 
 -- -----------------------------------------------------------------------------
--- horarios de atención de la sede
+-- horarios de atención de la empresa
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS core.horarios_atencion (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

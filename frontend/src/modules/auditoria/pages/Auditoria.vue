@@ -57,7 +57,7 @@
       <div v-else class="module-panel-body tabla-wrap">
         <table>
           <thead>
-            <tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Entidad</th><th>Sede</th><th>Cambios</th></tr>
+            <tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Entidad</th><th>Empresa</th><th>Cambios</th></tr>
           </thead>
           <tbody>
             <tr v-for="e in eventos" :key="e.id">
@@ -72,7 +72,7 @@
               <td>
                 <span class="tag">{{ capitalizar(e.entidad) }}</span>
               </td>
-              <td class="muted">{{ e.sede || "—" }}</td>
+              <td class="muted">{{ e.empresa || "—" }}</td>
               <td>
                 <button v-if="tieneDiff(e)" class="btn mini" @click="verDiff(e)">
                   <Eye :size="12" /> {{ Object.keys(e.diff).length }} campos

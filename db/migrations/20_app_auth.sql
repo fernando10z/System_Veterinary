@@ -308,9 +308,15 @@ AS $$
 DECLARE
   v_cli RECORD;
 BEGIN
+  -- El documento es único por empresa, así que la misma persona puede existir
+  -- en varias. Se toma la primera cuyo password coincida más abajo; en la
+  -- práctica solo una empresa le habilita el portal.
   SELECT c.* INTO v_cli FROM core.clientes c
    WHERE (c.numero_documento = p_documento OR lower(c.correo) = lower(p_documento))
-     AND c.deleted_at IS NULL;
+     AND c.portal_acceso = true
+     AND c.deleted_at IS NULL
+   ORDER BY c.portal_ultimo_login_at DESC NULLS LAST, c.created_at
+   LIMIT 1;
 
   IF NOT FOUND OR v_cli.portal_acceso = false OR v_cli.portal_password_hash IS NULL THEN
     RETURN jsonb_build_object('ok', false,
@@ -333,7 +339,10 @@ BEGIN
     'cliente', jsonb_build_object(
       'id', v_cli.id, 'codigo', v_cli.codigo,
       'nombres', v_cli.nombres, 'apellido_paterno', v_cli.apellido_paterno,
-      'correo', v_cli.correo, 'telefono', v_cli.telefono
+      'correo', v_cli.correo, 'telefono', v_cli.telefono,
+      -- El propietario pertenece a UNA empresa: el portal solo le muestra
+      -- lo de esa empresa y solo puede pedir cita ahí.
+      'empresa_id', v_cli.empresa_id
     )
   ));
 

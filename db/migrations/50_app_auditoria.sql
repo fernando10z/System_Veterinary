@@ -43,7 +43,7 @@ BEGIN
            a.user_id,
            trim(u.nombres || ' ' || COALESCE(u.apellido_paterno,'')) AS usuario,
            u.email AS usuario_email,
-           e.nombre_comercial AS sede
+           e.nombre_comercial AS empresa
     FROM core.audit_log a
     LEFT JOIN core.users u ON u.id = a.user_id
     LEFT JOIN core.empresas e ON e.id = a.empresa_id

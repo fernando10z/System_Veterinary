@@ -155,7 +155,7 @@ $$;
 -- -----------------------------------------------------------------------------
 -- app.fn_citas_disponibilidad
 -- Devuelve los huecos libres de un veterinario en una fecha, cruzando el horario
--- de atención de la sede, su disponibilidad declarada y las citas ya tomadas.
+-- de atención de la empresa, su disponibilidad declarada y las citas ya tomadas.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.fn_citas_disponibilidad(
   p_user_id        UUID,
@@ -185,7 +185,7 @@ BEGIN
   v_dur := COALESCE(v_dur, 30);
 
   -- Franjas candidatas: la disponibilidad declarada del profesional para esa
-  -- fecha; si no declaró nada, el horario de atención de la sede.
+  -- fecha; si no declaró nada, el horario de atención de la empresa.
   FOR v_rango IN
     SELECT d.hora_inicio, d.hora_fin
       FROM core.disponibilidad d
@@ -258,16 +258,18 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'citas:crear');
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','fecha_hora']);
 
-  -- El propietario se deriva de la mascota: no puede venir desalineado.
+  -- El propietario se deriva de la mascota, y la mascota debe pertenecer a la
+  -- empresa: así no se puede agendar un paciente de otra empresa pasando su id.
   SELECT cliente_id INTO v_cliente FROM core.mascotas
-   WHERE id = (p_payload->>'mascota_id')::uuid AND deleted_at IS NULL;
+   WHERE id = (p_payload->>'mascota_id')::uuid AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   IF v_cliente IS NULL THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','El paciente indicado no existe','mascota_id'));
   END IF;
 
-  -- Duración: la del servicio, o la configurada por la sede
+  -- Duración: la del servicio, o la configurada por la empresa
   SELECT COALESCE(
     NULLIF(p_payload->>'duracion_min','')::int,
     (SELECT s.duracion_min FROM core.servicios s
@@ -343,7 +345,9 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'citas:editar');
 
-  SELECT * INTO v_cita FROM core.citas WHERE id = p_id AND deleted_at IS NULL;
+  SELECT * INTO v_cita FROM core.citas
+   WHERE id = p_id AND deleted_at IS NULL AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Cita no encontrada'));
@@ -412,7 +416,9 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'citas:editar');
 
-  SELECT * INTO v_cita FROM core.citas WHERE id = p_id AND deleted_at IS NULL;
+  SELECT * INTO v_cita FROM core.citas
+   WHERE id = p_id AND deleted_at IS NULL AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Cita no encontrada'));
@@ -549,7 +555,9 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'citas:eliminar');
 
-  SELECT estado INTO v_estado FROM core.citas WHERE id = p_id AND deleted_at IS NULL;
+  SELECT estado INTO v_estado FROM core.citas
+   WHERE id = p_id AND deleted_at IS NULL AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Cita no encontrada'));

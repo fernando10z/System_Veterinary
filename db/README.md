@@ -23,7 +23,7 @@ colar un archivo antes que otro del que depende.
 
 | Rango | Contenido |
 |---|---|
-| `00`–`06` | Extensiones, schemas, ENUMs, tablas y triggers |
+| `00`–`06` | Extensiones, schemas, ENUMs, tablas y triggers. `03` son las tablas compartidas (identidad y taxonomía); `04`, todo lo que lleva `empresa_id`. |
 | `10` | Helpers de `internal` |
 | `20`–`50` | SPs por dominio (auth, sedes, users, roles, clientes, mascotas, catálogos, citas, clínico, inventario, compras, facturación, pagos/caja, RRHH, dashboard, reportes, portal, auditoría) |
 | `90` | Rol de aplicación y grants |
@@ -37,8 +37,17 @@ colar un archivo antes que otro del que depende.
   capturan con `EXCEPTION WHEN OTHERS`.
 - **Errores**: `internal.error_jsonb(code, message, field?)` con códigos que el backend
   mapea a HTTP (`NOT_FOUND`, `FORBIDDEN`, `CONFLICT`, `VALIDATION_ERROR`, `BUSINESS_RULE`).
-- **Filtro de sede**: siempre
+- **Filtro de empresa (lectura)**: siempre
   `(internal.es_acceso_global(p_user_id, p_is_super_admin) OR x.empresa_id = v_emp)`.
+- **Empresa en escritura**: se toma de `internal.empresa_efectiva(...)` o se hereda
+  del registro padre. **Nunca del payload**: aceptarla del cliente permitiría escribir
+  en otra empresa.
+- **Todo SP que recibe el id de un registro debe comprobar a quién pertenece**, con
+  `internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, <empresa_del_registro>)`.
+  Tener el permiso no basta: un administrador lo es *de su empresa*, y sin esta
+  comprobación podría modificar un registro ajeno con solo conocer su UUID. Cuando
+  falla se responde `NOT_FOUND`, no `FORBIDDEN`, para no revelar que existe en otra
+  empresa.
 - **Un solo nombre por función**: dos SPs con el mismo nombre y aridad hacen la llamada
   ambigua desde el backend (`function ... is not unique`).
 

@@ -120,7 +120,7 @@
                 <div v-if="e.resumen" class="hc-resumen">{{ e.resumen }}</div>
                 <div class="hc-meta">
                   <template v-if="e.veterinario">{{ e.veterinario }}</template>
-                  <template v-if="e.sede"> · {{ e.sede }}</template>
+                  <template v-if="e.empresa"> · {{ e.empresa }}</template>
                 </div>
               </div>
             </div>
@@ -145,14 +145,14 @@
 
           <div v-else class="module-panel-body tabla-wrap">
             <table>
-              <thead><tr><th>Fecha</th><th>Mascota</th><th>Servicio</th><th>Veterinario</th><th>Sede</th><th>Estado</th></tr></thead>
+              <thead><tr><th>Fecha</th><th>Mascota</th><th>Servicio</th><th>Veterinario</th><th>Clínica</th><th>Estado</th></tr></thead>
               <tbody>
                 <tr v-for="c in citas" :key="c.id">
                   <td class="mono">{{ fmtFechaHora(c.fecha_hora) }}</td>
                   <td><strong>{{ c.mascota }}</strong></td>
                   <td>{{ c.servicio || c.motivo || "—" }}</td>
                   <td class="muted">{{ c.veterinario || "Por asignar" }}</td>
-                  <td class="muted">{{ c.sede }}</td>
+                  <td class="muted">{{ c.empresa }}</td>
                   <td>
                     <span :class="['estado-pill', toneCita(c.estado)]">
                       <span class="dot"></span>{{ capitalizar(c.estado) }}

@@ -82,7 +82,7 @@
         <table>
           <thead>
             <tr>
-              <th>Usuario</th><th>Correo</th><th>Rol</th><th>Sede</th>
+              <th>Usuario</th><th>Correo</th><th>Rol</th><th>Empresa</th>
               <th>Último acceso</th><th>Estado</th><th class="acciones-col"></th>
             </tr>
           </thead>
@@ -114,7 +114,7 @@
                   <ShieldCheck :size="10" /> super
                 </span>
               </td>
-              <td class="muted">{{ u.empresa_nombre || "Todas las sedes" }}</td>
+              <td class="muted">{{ u.empresa_nombre || "Todas las empresas" }}</td>
               <td class="muted mono">{{ u.ultimo_login_at ? fmtFechaHora(u.ultimo_login_at) : "Nunca" }}</td>
               <td>
                 <span :class="['estado-pill', toneEstado(u.estado)]">

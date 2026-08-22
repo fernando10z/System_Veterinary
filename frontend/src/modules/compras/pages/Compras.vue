@@ -22,7 +22,7 @@
       <div class="stat">
         <div class="stat-label">Proveedores <span class="icon-tile"><Truck :size="14" /></span></div>
         <div class="stat-val">{{ proveedores.length }}<span class="unit">activos</span></div>
-        <div class="stat-meta">registrados en la sede</div>
+        <div class="stat-meta">registrados en la empresa</div>
       </div>
       <div class="stat">
         <div class="stat-label">Órdenes abiertas <span class="icon-tile amber"><ClipboardList :size="14" /></span></div>

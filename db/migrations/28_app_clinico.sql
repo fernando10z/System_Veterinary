@@ -34,8 +34,11 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','motivo']);
 
+  -- El paciente debe ser de la empresa: un id de otra empresa se comporta
+  -- como inexistente.
   SELECT cliente_id INTO v_cliente FROM core.mascotas
-   WHERE id = (p_payload->>'mascota_id')::uuid AND deleted_at IS NULL;
+   WHERE id = (p_payload->>'mascota_id')::uuid AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   IF v_cliente IS NULL THEN
     RETURN jsonb_build_object('ok', false,
@@ -134,7 +137,10 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
 
   SELECT estado, to_jsonb(c) INTO v_estado, v_antes
-    FROM core.consultas c WHERE c.id = p_id AND c.deleted_at IS NULL;
+    FROM core.consultas c
+   WHERE c.id = p_id AND c.deleted_at IS NULL
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), c.empresa_id);
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
@@ -198,7 +204,10 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
 
-  SELECT * INTO v_consulta FROM core.consultas WHERE id = p_id AND deleted_at IS NULL;
+  SELECT * INTO v_consulta FROM core.consultas
+   WHERE id = p_id AND deleted_at IS NULL
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Consulta no encontrada'));
@@ -403,7 +412,9 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','nombre_vacuna']);
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = v_mascota AND deleted_at IS NULL;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = v_mascota AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
   IF v_cliente IS NULL THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','El paciente indicado no existe','mascota_id'));
@@ -488,13 +499,22 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_data JSONB;
+  v_global BOOLEAN := internal.es_acceso_global(p_user_id, p_is_super_admin);
+  v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_data   JSONB;
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM core.mascotas
+                  WHERE id = p_mascota_id AND deleted_at IS NULL
+                    AND (v_global OR empresa_id = v_emp)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Paciente no encontrado'));
+  END IF;
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_aplicacion DESC), '[]'::jsonb) INTO v_data
   FROM (
     SELECT v.id, v.nombre_vacuna, v.laboratorio, v.lote, v.fecha_aplicacion,
            v.dosis_numero, v.proximo_refuerzo, v.via, v.reaccion_adversa,
-           v.observaciones, emp.nombre_comercial AS sede,
+           v.observaciones, emp.nombre_comercial AS empresa,
            trim(u.nombres || ' ' || COALESCE(u.apellido_paterno,'')) AS veterinario,
            u.colegiatura,
            CASE
@@ -507,6 +527,7 @@ BEGIN
     LEFT JOIN core.users u ON u.id = v.veterinario_id
     LEFT JOIN core.empresas emp ON emp.id = v.empresa_id
     WHERE v.mascota_id = p_mascota_id
+      AND (v_global OR v.empresa_id = v_emp)
   ) x;
 
   RETURN jsonb_build_object('ok', true, 'data', v_data);
@@ -542,7 +563,9 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','producto_nombre']);
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = v_mascota AND deleted_at IS NULL;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = v_mascota AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   INSERT INTO core.desparasitaciones (
     empresa_id, mascota_id, veterinario_id, consulta_id, producto_id,
@@ -614,7 +637,9 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','medicamento','dosis']);
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = v_mascota AND deleted_at IS NULL;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = v_mascota AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   INSERT INTO core.tratamientos (
     empresa_id, mascota_id, consulta_id, veterinario_id, producto_id,
@@ -669,7 +694,9 @@ BEGIN
   UPDATE core.tratamientos
      SET estado = p_estado::core.estado_tratamiento,
          fecha_fin = CASE WHEN p_estado <> 'activo' THEN COALESCE(fecha_fin, CURRENT_DATE) ELSE fecha_fin END
-   WHERE id = p_id;
+   WHERE id = p_id
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
@@ -707,7 +734,9 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','nombre']);
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = v_mascota AND deleted_at IS NULL;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = v_mascota AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
   IF v_cliente IS NULL THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','El paciente indicado no existe','mascota_id'));
@@ -761,7 +790,10 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
 
-  SELECT * INTO v_cir FROM core.cirugias WHERE id = p_id;
+  SELECT * INTO v_cir FROM core.cirugias
+   WHERE id = p_id
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Cirugía no encontrada'));
@@ -878,7 +910,9 @@ BEGIN
       'error', internal.error_jsonb('CONFLICT','El paciente ya está hospitalizado'));
   END IF;
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = v_mascota AND deleted_at IS NULL;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = v_mascota AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   INSERT INTO core.hospitalizaciones (
     empresa_id, codigo, mascota_id, veterinario_id, consultorio_id, jaula,
@@ -920,6 +954,15 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['hospitalizacion_id']);
 
+  IF NOT EXISTS (
+      SELECT 1 FROM core.hospitalizaciones h
+       WHERE h.id = (p_payload->>'hospitalizacion_id')::uuid
+         AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+               internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), h.empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Hospitalización no encontrada','hospitalizacion_id'));
+  END IF;
+
   INSERT INTO core.hospitalizacion_evoluciones (
     hospitalizacion_id, user_id, fecha_hora, temperatura_c,
     frecuencia_cardiaca, frecuencia_respiratoria, come, orina, defeca, nota
@@ -959,7 +1002,10 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
 
-  SELECT * INTO v_h FROM core.hospitalizaciones WHERE id = p_id;
+  SELECT * INTO v_h FROM core.hospitalizaciones
+   WHERE id = p_id
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Hospitalización no encontrada'));
@@ -1051,7 +1097,9 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','tipo','nombre']);
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = v_mascota AND deleted_at IS NULL;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = v_mascota AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   INSERT INTO core.examenes (
     empresa_id, mascota_id, consulta_id, servicio_id, veterinario_id,
@@ -1103,7 +1151,9 @@ DECLARE
 BEGIN
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','nota']);
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = v_mascota AND deleted_at IS NULL;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = v_mascota AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   INSERT INTO core.notas_medicas (empresa_id, mascota_id, user_id, nota, destacada)
   VALUES (v_emp, v_mascota, p_user_id, p_payload->>'nota',
@@ -1140,7 +1190,9 @@ DECLARE
 BEGIN
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','titulo','storage_key']);
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = v_mascota AND deleted_at IS NULL;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = v_mascota AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   INSERT INTO core.documentos_medicos (
     empresa_id, mascota_id, consulta_id, tipo, titulo, descripcion,
@@ -1179,8 +1231,17 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_data JSONB;
+  v_global BOOLEAN := internal.es_acceso_global(p_user_id, p_is_super_admin);
+  v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_data   JSONB;
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM core.mascotas
+                  WHERE id = p_mascota_id AND deleted_at IS NULL
+                    AND (v_global OR empresa_id = v_emp)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Paciente no encontrado'));
+  END IF;
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.created_at DESC), '[]'::jsonb) INTO v_data
   FROM (
     SELECT d.id, d.tipo, d.titulo, d.descripcion, d.storage_key, d.mime_type,
@@ -1189,6 +1250,7 @@ BEGIN
     FROM core.documentos_medicos d
     LEFT JOIN core.users u ON u.id = d.created_by
     WHERE d.mascota_id = p_mascota_id
+      AND (v_global OR d.empresa_id = v_emp)
   ) x;
 
   RETURN jsonb_build_object('ok', true, 'data', v_data);
@@ -1225,10 +1287,14 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','servicio_id']);
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = v_mascota AND deleted_at IS NULL;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = v_mascota AND deleted_at IS NULL
+     AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
 
   SELECT COALESCE(NULLIF(p_payload->>'precio_unitario','')::numeric, s.precio) INTO v_precio
-    FROM core.servicios s WHERE s.id = (p_payload->>'servicio_id')::uuid;
+    FROM core.servicios s
+   WHERE s.id = (p_payload->>'servicio_id')::uuid AND s.deleted_at IS NULL
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, s.empresa_id);
 
   IF v_precio IS NULL THEN
     RETURN jsonb_build_object('ok', false,
@@ -1281,7 +1347,9 @@ BEGIN
   PERFORM internal.validar_payload(p_payload, ARRAY['producto_id','cantidad']);
 
   SELECT COALESCE(NULLIF(p_payload->>'precio_unitario','')::numeric, precio_venta)
-    INTO v_precio FROM core.productos WHERE id = v_prod AND deleted_at IS NULL;
+    INTO v_precio FROM core.productos
+   WHERE id = v_prod AND deleted_at IS NULL
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id);
 
   IF v_precio IS NULL THEN
     RETURN jsonb_build_object('ok', false,
@@ -1334,6 +1402,12 @@ DECLARE
   v_serv  JSONB;
   v_ins   JSONB;
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM core.clientes c
+                  WHERE c.id = p_cliente_id AND c.deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, c.empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Cliente no encontrado'));
+  END IF;
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'orden_servicio_id', os.id, 'tipo', 'servicio',
            'servicio_id', os.servicio_id, 'codigo', s.codigo,
@@ -1347,6 +1421,8 @@ BEGIN
   JOIN core.mascotas m ON m.id = os.mascota_id
   WHERE os.empresa_id = v_emp AND os.cliente_id = p_cliente_id
     AND os.facturado = false AND os.estado = 'completado';
+  -- Nota: el filtro por os.empresa_id ya acota el resultado a la empresa; un
+  -- cliente de otra empresa simplemente no tiene órdenes aquí.
 
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'insumo_id', iu.id, 'tipo', 'producto',

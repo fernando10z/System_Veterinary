@@ -48,12 +48,27 @@ puede firmar? ¿queda stock? ¿el cliente tiene RUC para factura?) es del SP.
 Eso permite que un SP se pruebe con `psql` sin levantar el backend, y que la respuesta
 sea idéntica venga de donde venga la llamada.
 
-## Aislamiento entre sedes
+## Aislamiento entre empresas
 
-El backend nunca decide qué sede ve un usuario: propaga
-`(user_id, empresa_id, is_super_admin)` y el SP decide con
+Cada empresa es un negocio independiente. El backend nunca decide qué empresa ve un
+usuario: propaga `(user_id, empresa_id, is_super_admin)` y el SP decide con
 `internal.es_acceso_global`. Un bug en el frontend no puede filtrar datos de otra
-sede, porque el filtro está en la consulta, no en la vista.
+empresa, porque el filtro está en la consulta, no en la vista.
+
+En **escritura** hay dos reglas, y ambas hacen falta:
+
+1. **La empresa se toma del contexto**, o se hereda del registro padre. Nunca del
+   payload: aceptarla del cliente sería dejar que elija dónde escribir.
+2. **Todo SP que recibe el id de un registro comprueba a quién pertenece**, con
+   `internal.es_de_empresa(...)`.
+
+La segunda no es redundante. Un administrador de empresa tiene el permiso
+`facturacion:anular` legítimamente, y si el SP solo verifica el permiso, anularía el
+comprobante de otra empresa con solo conocer su UUID: el permiso lo tiene y el
+registro existe. Falta preguntar *de quién es*.
+
+Cuando la comprobación falla se responde `NOT_FOUND`, no `FORBIDDEN`: un `403`
+confirmaría que el registro existe en otra empresa, que ya es información.
 
 ## Dos autenticaciones separadas
 
@@ -69,8 +84,8 @@ Cada acto clínico —consulta, vacuna, cirugía, hospitalización, examen, nota
 un evento en `core.historia_clinica` a través de
 `internal.registrar_evento_clinico`. Armar el historial de un paciente es entonces un
 `SELECT … ORDER BY fecha DESC`, no seis consultas mezcladas en el cliente. Y como la
-tabla no filtra por sede para un usuario con acceso global, **la historia sigue al
-paciente entre sedes**, que es como funciona una cadena veterinaria real.
+tabla lleva `empresa_id`, **cada empresa ve solo los eventos que registró**: la
+historia clínica no cruza negocios independientes.
 
 ## Una sola puerta al inventario
 

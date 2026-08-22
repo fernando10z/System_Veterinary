@@ -194,7 +194,7 @@ BEGIN
         'Un veterinario necesita número de colegiatura para firmar la historia clínica','colegiatura'));
   END IF;
 
-  -- La sede se deriva del scope del rol: global ⇒ NULL, empresa ⇒ obligatoria.
+  -- La empresa se deriva del scope del rol: global ⇒ NULL, empresa ⇒ obligatoria.
   SELECT scope INTO v_scope FROM core.roles WHERE id = v_rol_id;
   IF v_scope IN ('global','global_restricted') THEN
     v_emp := NULL;
@@ -203,7 +203,7 @@ BEGIN
                       internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin));
     IF v_emp IS NULL THEN
       RETURN jsonb_build_object('ok', false,
-        'error', internal.error_jsonb('VALIDATION_ERROR','Debes indicar la sede del usuario','empresa_id'));
+        'error', internal.error_jsonb('VALIDATION_ERROR','Debes indicar la empresa del usuario','empresa_id'));
     END IF;
     PERFORM internal.assert_acceso_empresa(p_user_id, v_emp, p_is_super_admin);
   END IF;
@@ -359,7 +359,7 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- app.sp_users_cambiar_rol
--- Cambiar el rol puede exigir mover (o vaciar) la sede: el scope manda.
+-- Cambiar el rol puede exigir mover (o vaciar) la empresa: el scope manda.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.sp_users_cambiar_rol(
   p_user_id        UUID,
@@ -399,7 +399,7 @@ BEGIN
     IF v_emp IS NULL THEN
       RETURN jsonb_build_object('ok', false,
         'error', internal.error_jsonb('VALIDATION_ERROR',
-          'Este rol opera en una sede: indica cuál','empresa_id'));
+          'Este rol opera en una empresa: indica cuál','empresa_id'));
     END IF;
   END IF;
 
