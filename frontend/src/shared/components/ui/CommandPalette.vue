@@ -8,7 +8,7 @@
         v-model="query"
         class="cmdk-box-input"
         type="text"
-        placeholder="Buscar módulos, clientes…"
+        placeholder="Buscar módulos, propietarios o pacientes…"
         autocomplete="off"
         spellcheck="false"
         @focus="open = true"
@@ -38,29 +38,43 @@
           </button>
         </template>
 
-        <template v-if="canSearchClients">
-          <div v-if="clientResults.length" class="cmdk-group-label">
-            Clientes
-            <span v-if="loadingClients" class="cmdk-spin">·</span>
+        <template v-if="puedeBuscar">
+          <div v-if="propietarios.length" class="cmdk-group-label">
+            Propietarios
+            <span v-if="buscando" class="cmdk-spin">·</span>
           </div>
           <button
-            v-for="cl in clientResults"
+            v-for="cl in propietarios"
             :key="'cli-' + cl.id"
-            :class="['cmdk-item', { active: flatIndex(cl, true) === activeIndex }]"
-            :data-idx="flatIndex(cl, true)"
-            @mousemove="activeIndex = flatIndex(cl, true)"
-            @click="goCliente(cl)"
+            :class="['cmdk-item', { active: flatIndex(cl, 'cliente') === activeIndex }]"
+            :data-idx="flatIndex(cl, 'cliente')"
+            @mousemove="activeIndex = flatIndex(cl, 'cliente')"
+            @click="irACliente(cl)"
           >
             <IdCard :size="16" class="cmdk-item-icon" />
-            <span class="cmdk-item-label">{{ cl.razon_social || cl.nombre }}</span>
-            <span class="cmdk-item-doc">{{ cl.numero_documento || cl.documento }}</span>
+            <span class="cmdk-item-label">{{ cl.nombre_completo }}</span>
+            <span class="cmdk-item-doc">{{ cl.numero_documento }}</span>
+          </button>
+
+          <div v-if="pacientes.length" class="cmdk-group-label">Pacientes</div>
+          <button
+            v-for="m in pacientes"
+            :key="'mas-' + m.id"
+            :class="['cmdk-item', { active: flatIndex(m, 'mascota') === activeIndex }]"
+            :data-idx="flatIndex(m, 'mascota')"
+            @mousemove="activeIndex = flatIndex(m, 'mascota')"
+            @click="irAPaciente(m)"
+          >
+            <PawPrint :size="16" class="cmdk-item-icon" />
+            <span class="cmdk-item-label">{{ m.nombre }}</span>
+            <span class="cmdk-item-doc">{{ m.especie }} · {{ m.propietario }}</span>
           </button>
         </template>
 
         <div v-if="isEmpty" class="cmdk-empty">
-          <template v-if="loadingClients">Buscando…</template>
+          <template v-if="buscando">Buscando…</template>
           <template v-else-if="query.trim()">Sin resultados para “{{ query.trim() }}”</template>
-          <template v-else>Escribe para buscar módulos o clientes</template>
+          <template v-else>Escribe para buscar módulos, propietarios o pacientes</template>
         </div>
 
         <div class="cmdk-foot">
@@ -76,10 +90,10 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
-import { Search, IdCard } from "lucide-vue-next";
+import { Search, IdCard, PawPrint } from "lucide-vue-next";
 import { useAuth } from "../../composables/useAuth.js";
 import { visibleNavItems } from "../../config/navigation.js";
-import { customersApi } from "../../../modules/customers/api/customers.api.js";
+import { clientesApi } from "../../../modules/clientes/api/clientes.api.js";
 
 const router = useRouter();
 const { hasPermission, isSuperAdmin } = useAuth();
@@ -91,15 +105,16 @@ const rootRef = ref(null);
 const inputRef = ref(null);
 const listRef = ref(null);
 
-const clientResults = ref([]);
-const loadingClients = ref(false);
+const propietarios = ref([]);
+const pacientes = ref([]);
+const buscando = ref(false);
 let searchToken = 0;
 let debounceTimer = null;
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const shortcut = isMac ? "⌘K" : "Ctrl K";
 
-const canSearchClients = computed(() => hasPermission("customers:listar"));
+const puedeBuscar = computed(() => hasPermission("clientes:listar"));
 const allNav = computed(() => visibleNavItems(hasPermission, isSuperAdmin.value));
 
 // Filtra la navegación por label/keywords/sección con el término escrito.
@@ -112,12 +127,17 @@ const navResults = computed(() => {
   });
 });
 
-// Índice plano para navegación por teclado (nav primero, luego clientes).
-function flatIndex(item, isClient = false) {
-  if (isClient) return navResults.value.length + clientResults.value.indexOf(item);
+// Índice plano para navegación por teclado: módulos → propietarios → pacientes.
+function flatIndex(item, tipo = "nav") {
+  if (tipo === "cliente") return navResults.value.length + propietarios.value.indexOf(item);
+  if (tipo === "mascota") {
+    return navResults.value.length + propietarios.value.length + pacientes.value.indexOf(item);
+  }
   return navResults.value.indexOf(item);
 }
-const totalResults = computed(() => navResults.value.length + clientResults.value.length);
+const totalResults = computed(
+  () => navResults.value.length + propietarios.value.length + pacientes.value.length,
+);
 const isEmpty = computed(() => totalResults.value === 0);
 
 function move(delta) {
@@ -130,12 +150,18 @@ function move(delta) {
 
 function chooseActive() {
   const idx = activeIndex.value;
-  if (idx < navResults.value.length) {
+  const nNav = navResults.value.length;
+  const nCli = propietarios.value.length;
+
+  if (idx < nNav) {
     const it = navResults.value[idx];
     if (it) go(it.to);
+  } else if (idx < nNav + nCli) {
+    const cl = propietarios.value[idx - nNav];
+    if (cl) irACliente(cl);
   } else {
-    const cl = clientResults.value[idx - navResults.value.length];
-    if (cl) goCliente(cl);
+    const m = pacientes.value[idx - nNav - nCli];
+    if (m) irAPaciente(m);
   }
 }
 
@@ -144,15 +170,21 @@ function go(to) {
   router.push(to);
 }
 
-function goCliente(cl) {
+function irACliente(cl) {
   reset();
-  router.push({ path: "/clientes", query: { buscar: cl.numero_documento || cl.razon_social || cl.nombre || "" } });
+  router.push(`/clientes/${cl.id}`);
+}
+
+function irAPaciente(m) {
+  reset();
+  router.push(`/pacientes/${m.id}`);
 }
 
 function reset() {
   open.value = false;
   query.value = "";
-  clientResults.value = [];
+  propietarios.value = [];
+  pacientes.value = [];
   activeIndex.value = 0;
   inputRef.value?.blur();
 }
@@ -162,27 +194,37 @@ function closeAndBlur() {
   inputRef.value?.blur();
 }
 
-// Búsqueda de clientes con debounce; token evita respuestas fuera de orden.
+// Búsqueda con debounce; el token evita que una respuesta lenta pise a una nueva.
+// fn_cliente_buscar ya trae las mascotas anidadas: aquí se aplanan para poder
+// saltar directo a la ficha del paciente, que es lo que más se busca en recepción.
 watch(query, (q) => {
   activeIndex.value = 0;
   clearTimeout(debounceTimer);
   const term = q.trim();
-  if (!canSearchClients.value || term.length < 2) {
-    clientResults.value = [];
-    loadingClients.value = false;
+  if (!puedeBuscar.value || term.length < 2) {
+    propietarios.value = [];
+    pacientes.value = [];
+    buscando.value = false;
     return;
   }
-  loadingClients.value = true;
+  buscando.value = true;
   const myToken = ++searchToken;
   debounceTimer = setTimeout(async () => {
     try {
-      const r = await customersApi.buscar(term, 6);
+      const r = await clientesApi.buscar(term, 6);
       if (myToken !== searchToken) return;
-      clientResults.value = r.data ?? [];
+      const filas = r.data ?? [];
+      propietarios.value = filas;
+      pacientes.value = filas.flatMap((c) =>
+        (c.mascotas ?? []).map((m) => ({ ...m, propietario: c.nombre_completo })),
+      ).slice(0, 8);
     } catch {
-      if (myToken === searchToken) clientResults.value = [];
+      if (myToken === searchToken) {
+        propietarios.value = [];
+        pacientes.value = [];
+      }
     } finally {
-      if (myToken === searchToken) loadingClients.value = false;
+      if (myToken === searchToken) buscando.value = false;
     }
   }, 220);
 });

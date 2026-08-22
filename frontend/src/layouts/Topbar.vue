@@ -20,6 +20,9 @@
 
     <div class="spacer" />
 
+    <!-- Buscador global: módulos, propietarios y pacientes -->
+    <CommandPalette />
+
     <!-- Caja abierta: el cajero necesita verlo sin entrar al módulo -->
     <router-link v-if="caja" to="/caja" class="caja-chip" title="Tienes una caja abierta">
       <Wallet :size="13" />
@@ -104,6 +107,7 @@ import {
   Sun, Moon, ChevronRight, PanelLeftClose, PanelLeftOpen, LogOut,
   Bell, Wallet, KeyRound,
 } from "lucide-vue-next";
+import CommandPalette from "../shared/components/ui/CommandPalette.vue";
 import { useAuth } from "../shared/composables/useAuth.js";
 import { useTheme } from "../shared/composables/useTheme.js";
 import { useSidebar } from "../shared/composables/useSidebar.js";
