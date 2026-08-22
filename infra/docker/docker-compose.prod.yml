@@ -1,0 +1,98 @@
+# =============================================================================
+# docker-compose.prod.yml — stack completo en un solo host.
+#
+# Requiere un archivo .env junto a este compose con:
+#   POSTGRES_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, COOKIE_SECRET,
+#   STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY, PUBLIC_API_URL
+#
+# Uso:
+#   docker compose -f infra/docker/docker-compose.prod.yml up -d --build
+#
+# Tras el primer arranque, aplicar el schema:
+#   DB_HOST=localhost DB_PORT=5432 DB_NAME=veterp bash db/scripts/apply-migrations.sh
+# =============================================================================
+
+name: veterp-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}
+      POSTGRES_DB: veterp
+      TZ: America/Lima
+      PGTZ: America/Lima
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d veterp"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Sin `ports`: la BD solo es accesible desde la red interna del compose.
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+
+  minio:
+    image: minio/minio:latest
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:?define STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:?define STORAGE_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/veterp
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY}
+      STORAGE_BUCKET: vet-docs
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?define JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?define JWT_REFRESH_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET:?define COOKIE_SECRET}
+      CORS_ORIGINS: ${PUBLIC_APP_URL:-http://localhost}
+    ports:
+      - "3100:3100"
+
+  web:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${PUBLIC_API_URL:-/api}
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+    name: veterp_postgres_data_prod
+  redis_data:
+    name: veterp_redis_data_prod
+  minio_data:
+    name: veterp_minio_data_prod

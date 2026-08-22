@@ -1,0 +1,190 @@
+/* ─────────────────────────────────────────────────────────────
+   patterns.css — Patrones de página recurrentes del ERP Veterinario.
+
+   globals.css trae el sistema de diseño (tokens, shell, botones, paneles).
+   Aquí viven los patrones que TODAS las pantallas repiten —filtros, tablas,
+   pills de estado, avatares, tarjetas de paciente— para que una lista de
+   pacientes y una de comprobantes se vean como el mismo producto y no haya
+   que redefinirlos en el <style scoped> de cada página.
+   ───────────────────────────────────────────────────────────── */
+
+/* ---------- Barra de filtros del panel ---------- */
+.fil {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 10px;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-radius: 8px; color: var(--ink-3);
+}
+.fil:focus-within { border-color: var(--emerald); box-shadow: 0 0 0 3px var(--emerald-soft); }
+.fil.grow { flex: 1; min-width: 180px; }
+.fil input, .fil select {
+  border: none; background: transparent; outline: none;
+  font-size: 13px; color: var(--ink); width: 100%; min-width: 0;
+}
+.fil input::placeholder { color: var(--ink-4); }
+.fil select { cursor: pointer; }
+.toolbar-spacer { flex: 1; }
+
+.chip-filter {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 32px; padding: 0 10px; border-radius: 8px;
+  background: var(--emerald-soft); color: var(--emerald-ink);
+  border: 1px solid var(--emerald-line);
+  font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.chip-filter .x { font-size: 15px; line-height: 1; }
+
+/* ---------- Tablas de datos ---------- */
+.tabla-wrap { overflow-x: auto; }
+.tabla-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tabla-wrap thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg-soft); color: var(--ink-3);
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  text-align: left; padding: 9px 14px; white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+.tabla-wrap tbody td {
+  padding: 11px 14px; border-bottom: 1px solid var(--line-soft);
+  color: var(--ink-2); vertical-align: middle;
+}
+.tabla-wrap tbody tr:last-child td { border-bottom: none; }
+.tabla-wrap tbody tr:hover { background: var(--bg-soft); }
+.tabla-wrap tr.clickable { cursor: pointer; }
+.tabla-wrap td.num, .tabla-wrap th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.acciones-col { width: 1%; white-space: nowrap; }
+.row-actions { display: inline-flex; gap: 4px; }
+
+/* ---------- Celda de entidad (avatar + dos líneas) ---------- */
+.entidad-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.entidad-cell .info { min-width: 0; }
+.entidad-cell strong {
+  display: block; font-size: 13px; font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.entidad-cell small { display: block; font-size: 11.5px; color: var(--ink-3); }
+
+.avatar-sm {
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: 999px;
+  background: var(--emerald-soft); color: var(--emerald-ink);
+  display: grid; place-items: center;
+  font-size: 11.5px; font-weight: 700; overflow: hidden;
+}
+.avatar-sm img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-sm.lg { width: 44px; height: 44px; font-size: 14px; }
+.avatar-sm.xl { width: 72px; height: 72px; font-size: 22px; }
+.avatar-sm.blue { background: var(--blue-soft); color: var(--blue-ink); }
+.avatar-sm.amber { background: var(--amber-soft); color: var(--amber-ink); }
+.avatar-sm.violet { background: var(--violet-soft); color: var(--violet); }
+
+/* ---------- Pills de estado ---------- */
+.estado-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  background: var(--bg-soft); color: var(--ink-2); border: 1px solid var(--line);
+}
+.estado-pill .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+.estado-pill.ok      { background: var(--emerald-soft); color: var(--emerald-ink); border-color: var(--emerald-line); }
+.estado-pill.info    { background: var(--blue-soft);    color: var(--blue-ink);    border-color: transparent; }
+.estado-pill.warn    { background: var(--amber-soft);   color: var(--amber-ink);   border-color: transparent; }
+.estado-pill.danger  { background: var(--red-soft);     color: var(--red-ink);     border-color: transparent; }
+.estado-pill.violet  { background: var(--violet-soft);  color: var(--violet);      border-color: transparent; }
+.estado-pill.neutral { background: var(--bg-soft);      color: var(--ink-3); }
+
+.tag {
+  display: inline-block; padding: 2px 8px; border-radius: 6px;
+  background: var(--bg-soft); border: 1px solid var(--line);
+  font-size: 11px; font-weight: 500; color: var(--ink-2); white-space: nowrap;
+}
+
+/* ---------- Estados de carga y vacío ---------- */
+.loading-mini {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--ink-3);
+}
+.spin { animation: girar 0.9s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+
+/* ---------- Grillas de detalle ---------- */
+.detalle-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px 22px;
+}
+.detalle-item .k {
+  font-size: 10.5px; font-weight: 600; color: var(--ink-4);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px;
+}
+.detalle-item .v { font-size: 13.5px; color: var(--ink); }
+
+/* ---------- Alertas clínicas (alergias, condiciones crónicas) ---------- */
+.alerta-clinica {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--red-soft); color: var(--red-ink);
+  border: 1px solid rgba(220, 64, 64, 0.25);
+  font-size: 12.5px; line-height: 1.45;
+}
+.alerta-clinica strong { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* ---------- Línea de tiempo clínica ---------- */
+.hc-timeline { position: relative; padding-left: 26px; }
+.hc-timeline::before {
+  content: ""; position: absolute; left: 9px; top: 6px; bottom: 6px;
+  width: 2px; background: var(--line);
+}
+.hc-evento { position: relative; padding: 0 0 20px 4px; }
+.hc-evento::before {
+  content: ""; position: absolute; left: -21px; top: 5px;
+  width: 10px; height: 10px; border-radius: 999px;
+  background: var(--bg-elev); border: 2px solid var(--emerald);
+}
+.hc-evento.tipo-vacuna::before        { border-color: var(--blue); }
+.hc-evento.tipo-cirugia::before       { border-color: var(--violet); }
+.hc-evento.tipo-hospitalizacion::before { border-color: var(--amber); }
+.hc-evento.tipo-nota::before          { border-color: var(--ink-4); }
+.hc-evento .hc-fecha { font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.hc-evento .hc-titulo { font-size: 13.5px; font-weight: 600; color: var(--ink); margin: 2px 0; }
+.hc-evento .hc-resumen { font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+.hc-evento .hc-meta { font-size: 11.5px; color: var(--ink-4); margin-top: 4px; }
+
+/* ---------- Tarjetas de agenda ---------- */
+.agenda-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.agenda-col-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 2px 2px; font-size: 11px; font-weight: 700;
+  color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.agenda-col-head .n {
+  background: var(--bg-soft); border-radius: 999px; padding: 1px 7px;
+  font-size: 10.5px; color: var(--ink-2);
+}
+.cita-card {
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-left: 3px solid var(--emerald);
+  border-radius: 10px; padding: 10px 12px; cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.cita-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.cita-card.urgencia   { border-left-color: var(--red); }
+.cita-card.preferente { border-left-color: var(--amber); }
+.cita-card .hora {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  color: var(--emerald-deep);
+}
+.cita-card .paciente { font-size: 13.5px; font-weight: 600; color: var(--ink); margin-top: 2px; }
+.cita-card .meta { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.cita-card .pie {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-top: 8px;
+}
+
+/* ---------- Barra de acciones de un modal ---------- */
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ---------- Utilidades ---------- */
+.stack { display: flex; flex-direction: column; gap: 4px; }
+.inline { display: inline-flex; align-items: center; gap: 6px; }
+.wrap-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.text-right { text-align: right; }
+.grow { flex: 1; }

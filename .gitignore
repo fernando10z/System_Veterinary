@@ -1,0 +1,25 @@
+# Dependencias
+node_modules/
+
+# Builds
+dist/
+build/
+
+# Entorno (nunca commitear secretos)
+.env
+.env.*
+!.env.example
+
+# Logs y temporales
+*.log
+npm-debug.log*
+.DS_Store
+*.swp
+
+# Backups de base de datos
+db/backups/
+
+# Herramientas
+.vscode/
+.idea/
+coverage/
