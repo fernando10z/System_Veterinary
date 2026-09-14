@@ -33,8 +33,8 @@ export class UsersRepository {
     return this.sp.callCtx("app.sp_users_cambiar_rol", ctx, [id, rolId, empresaId ?? null]);
   }
 
-  resetPassword(ctx: SpContext, id: string, passwordTemp: string) {
-    return this.sp.callCtx("app.sp_users_reset_password", ctx, [id, passwordTemp]);
+  resetPassword(ctx: SpContext, id: string, password_temp: string) {
+    return this.sp.callCtx("app.sp_users_reset_password", ctx, [id, password_temp]);
   }
 
   eliminar(ctx: SpContext, id: string) {

@@ -261,7 +261,7 @@ onMounted(cargar);
 </script>
 
 <style scoped>
-.roles-grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+.roles-grid { display: grid; grid-template-columns: 320px 1fr; gap: var(--gap-paneles); align-items: start; }
 @media (max-width: 900px) { .roles-grid { grid-template-columns: 1fr; } }
 
 .roles-lista { display: flex; flex-direction: column; gap: 2px; padding: 8px; }

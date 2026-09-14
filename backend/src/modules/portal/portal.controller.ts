@@ -56,7 +56,7 @@ export class PortalController {
   ) {
     return {
       ok: true,
-      data: await this.portal.cambiarPassword(clienteId, dto.passwordActual, dto.passwordNuevo),
+      data: await this.portal.cambiarPassword(clienteId, dto.password_actual, dto.password_nuevo),
     };
   }
 }

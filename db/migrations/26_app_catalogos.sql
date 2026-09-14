@@ -33,13 +33,17 @@ BEGIN
            (SELECT count(*) FROM core.mascotas m
              WHERE m.especie_id = e.id AND m.deleted_at IS NULL
                AND (v_global OR m.empresa_id = v_emp)) AS total_pacientes,
+           -- Razas globales (empresa_id NULL) más las que agregó esta empresa.
            (SELECT COALESCE(jsonb_agg(jsonb_build_object(
                      'id', r.id, 'nombre', r.nombre, 'tamanio_referencia', r.tamanio_referencia,
                      'peso_min_kg', r.peso_min_kg, 'peso_max_kg', r.peso_max_kg,
-                     'esperanza_vida', r.esperanza_vida, 'estado', r.estado)
+                     'esperanza_vida', r.esperanza_vida, 'estado', r.estado,
+                     'propia', r.empresa_id IS NOT NULL)
                    ORDER BY r.nombre), '[]'::jsonb)
-              FROM core.razas r WHERE r.especie_id = e.id
-                AND (p_incluir_inactivos OR r.estado = 'activo')) AS razas
+              FROM core.razas r
+             WHERE r.especie_id = e.id
+               AND (r.empresa_id IS NULL OR v_global OR r.empresa_id = v_emp)
+               AND (p_incluir_inactivos OR r.estado = 'activo')) AS razas
     FROM core.especies e
     WHERE (p_incluir_inactivos OR e.estado = 'activo')
   ) x;
@@ -115,22 +119,24 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_id UUID := NULLIF(p_payload->>'id','')::uuid;
+  v_id  UUID := NULLIF(p_payload->>'id','')::uuid;
+  v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
-  IF NOT p_is_super_admin THEN
-    RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('FORBIDDEN',
-        'La taxonomía (especies, razas y especialidades) la mantiene el operador del ERP: '
-        'es compartida por todas las empresas'));
-  END IF;
   PERFORM internal.assert_permiso(p_user_id, 'catalogos:gestionar');
 
+  -- Una raza sin empresa es taxonomía global y solo la toca el operador del ERP.
+  -- Cualquier empresa puede crear las SUYAS, que solo ella ve: así no necesita un
+  -- campo de texto libre en la ficha del paciente para las razas fuera de catálogo.
   IF v_id IS NULL THEN
     PERFORM internal.validar_payload(p_payload, ARRAY['especie_id','nombre']);
     INSERT INTO core.razas (
-      especie_id, nombre, tamanio_referencia, peso_min_kg, peso_max_kg, esperanza_vida, estado
+      especie_id, empresa_id, nombre, tamanio_referencia, peso_min_kg, peso_max_kg,
+      esperanza_vida, estado
     ) VALUES (
-      (p_payload->>'especie_id')::uuid, p_payload->>'nombre',
+      (p_payload->>'especie_id')::uuid,
+      CASE WHEN p_is_super_admin AND COALESCE((p_payload->>'global')::boolean, false)
+           THEN NULL ELSE v_emp END,
+      p_payload->>'nombre',
       NULLIF(p_payload->>'tamanio_referencia','')::core.tamanio_mascota,
       NULLIF(p_payload->>'peso_min_kg','')::numeric,
       NULLIF(p_payload->>'peso_max_kg','')::numeric,
@@ -138,6 +144,16 @@ BEGIN
       COALESCE((p_payload->>'estado')::core.estado_generico, 'activo'))
     RETURNING id INTO v_id;
   ELSE
+    -- Editar: la global solo el super admin; la propia, su empresa.
+    IF NOT EXISTS (SELECT 1 FROM core.razas
+                    WHERE id = v_id
+                      AND ((empresa_id IS NULL AND p_is_super_admin)
+                           OR internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id))) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('FORBIDDEN',
+          'Las razas del catálogo global las mantiene el operador del ERP'));
+    END IF;
+
     UPDATE core.razas SET
       nombre             = COALESCE(p_payload->>'nombre', nombre),
       tamanio_referencia = COALESCE(NULLIF(p_payload->>'tamanio_referencia','')::core.tamanio_mascota, tamanio_referencia),

@@ -3,7 +3,7 @@
     <PageHeader
       eyebrow="Historia clínica"
       title="Hospitalización"
-      :subtitle="`${internados.length} pacientes internados`"
+      :subtitle="`${internados.length} ${internados.length === 1 ? 'paciente internado' : 'pacientes internados'}`"
     >
       <template #actions>
         <label class="check-line">
@@ -223,8 +223,17 @@ onMounted(cargar);
 </script>
 
 <style scoped>
-.hosp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
+/* auto-fit, no auto-fill: con un solo internado la ficha ocupa el ancho en vez
+   de dejar dos columnas muertas al lado. A partir de tres se comporta igual.
+   420px de mínimo: por debajo, el diagnóstico se parte en demasiadas líneas. */
+.hosp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: var(--gap-paneles); }
 .hosp-top { display: flex; align-items: center; gap: 12px; }
+.hosp-top .text-right { flex-shrink: 0; }
+
+/* El pie de panel reparte a los extremos porque casi siempre lleva "Página X de
+   Y" a la izquierda. Aquí son dos acciones: con la ficha a ancho completo
+   quedarían a un palmo una de otra, así que se agrupan a la derecha. */
+.hosp-card .module-panel-foot { justify-content: flex-end; }
 .hosp-top .motivo { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .dias { font-size: 22px; font-weight: 700; color: var(--emerald-deep); line-height: 1; }
 

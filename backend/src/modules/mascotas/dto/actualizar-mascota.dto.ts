@@ -7,7 +7,6 @@ export class ActualizarMascotaDto {
   @IsOptional() @IsString() @MaxLength(100) nombre?: string;
   @IsOptional() @IsUUID() especie_id?: string;
   @IsOptional() @IsUUID() raza_id?: string;
-  @IsOptional() @IsString() @MaxLength(120) raza_libre?: string;
   @IsOptional() @IsIn(["macho", "hembra", "desconocido"]) sexo?: string;
   @IsOptional() @IsString() @MaxLength(80) color?: string;
   @IsOptional() @IsString() senias_particulares?: string;

@@ -343,7 +343,7 @@ onMounted(cargarTodo);
 </script>
 
 <style scoped>
-.empresa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.empresa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-paneles); align-items: start; }
 @media (max-width: 1000px) { .empresa-grid { grid-template-columns: 1fr; } }
 .req { color: var(--red); }
 </style>

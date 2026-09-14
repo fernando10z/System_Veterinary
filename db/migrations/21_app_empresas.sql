@@ -107,7 +107,7 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_id  UUID;
-  v_ruc TEXT := p_payload->>'ruc';
+  v_ruc TEXT := internal.normalizar_documento(p_payload->>'ruc');
 BEGIN
   IF NOT p_is_super_admin THEN
     RETURN jsonb_build_object('ok', false,

@@ -3,13 +3,24 @@
 Base: `http://localhost:3100/api`. Todas las respuestas usan
 `{ ok: true, data, meta? }` o `{ ok: false, error: { code, message, detail? } }`.
 
-Salvo las marcadas como públicas, todas exigen `Authorization: Bearer <accessToken>`.
+Salvo las marcadas como públicas, todas exigen `Authorization: Bearer <access_token>`.
+
+**Convención de nombres.** El cuerpo de la petición y la respuesta usan
+`snake_case`, igual que las columnas y los payloads de los SPs, para que el dato
+viaje con el mismo nombre de punta a punta. Los parámetros de query usan
+`camelCase` (`veterinarioId`, `pageSize`, `soloCriticos`): no son datos del
+dominio sino opciones de la consulta.
+
+**Texto de entrada.** El backend recorta y colapsa espacios antes de validar, y
+la base normaliza documentos, nombres, teléfonos y correos al guardarlos
+(ver [ADR-004](../decisions/004-normalizacion-en-la-base.md)). Pegar
+`" 12.345.678 "` en el DNI funciona; se guarda `12345678`.
 
 ## Auth
 
 | Método | Ruta | Notas |
 |---|---|---|
-| POST | `/auth/login` | Público. Devuelve `accessToken`, `refreshToken`, `user`, `rol`, `permisos`, `empresa`. |
+| POST | `/auth/login` | Público. Devuelve `access_token`, `refresh_token`, `user`, `rol`, `permisos`, `empresa`. |
 | POST | `/auth/refresh` | Público. Rota el refresh token. |
 | POST | `/auth/logout` | Público. Revoca el refresh. |
 | GET | `/auth/perfil` | Datos frescos del usuario en sesión. |
@@ -81,6 +92,6 @@ Requieren el token del portal.
 | `VALIDATION_ERROR` | 422 | Falta un campo o el valor no es válido |
 | `BUSINESS_RULE` | 422 | Una regla de negocio lo impide |
 | `NOT_FOUND` | 404 | El registro no existe, o pertenece a otra empresa (no se revela cuál de las dos) |
-| `FORBIDDEN` | 403 | Sin permiso o sin acceso a la sede |
+| `FORBIDDEN` | 403 | Sin permiso o sin acceso a la empresa |
 | `UNAUTHORIZED` | 401 | Token ausente, inválido o expirado |
 | `CONFLICT` | 409 | Duplicado (documento, código, caja abierta) |

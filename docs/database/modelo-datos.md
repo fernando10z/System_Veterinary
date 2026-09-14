@@ -67,14 +67,46 @@ que dos cajeros emitan el mismo número al mismo tiempo.
 servicios con movimientos no se eliminan: se desactivan. El SP lo decide y lo informa
 en la respuesta, para que la UI pueda explicarlo.
 
+## Normalización
+
+El dato se limpia **al entrar**, no al consultarlo. Las funciones viven en
+`internal` (`11_normalizacion.sql`) y se aplican con triggers `BEFORE INSERT OR
+UPDATE`, así que da igual si el registro llega por un SP, por una carga masiva o
+por un `UPDATE` a mano en una consola: sale normalizado igual.
+
+| Función | Qué hace | Ejemplo |
+|---|---|---|
+| `normalizar_texto` | Recorta y colapsa espacios internos | `'  a   b '` → `'a b'` |
+| `normalizar_nombre` | Capitaliza respetando partículas castellanas | `'DE LA cruz'` → `'De la Cruz'` |
+| `normalizar_documento` | Deja solo dígitos | `' 12-345.678 '` → `'12345678'` |
+| `normalizar_telefono` | Deja dígitos y el `+` inicial | `'(01) 445-5667'` → `'014455667'` |
+| `normalizar_correo` | Recorta y pasa a minúsculas | `'  A@GMAIL.COM '` → `'a@gmail.com'` |
+| `normalizar_codigo` | Recorta y pasa a mayúsculas | `' prd-01 '` → `'PRD-01'` |
+
+Llevan trigger: `clientes`, `users`, `mascotas`, `proveedores`,
+`proveedor_contactos`, `empresas`, `productos`, `servicios`, `especies` y `razas`.
+
+**Por qué importa para la unicidad.** El documento es único por empresa. Sin
+normalizar, `12345678` y `12.345.678` son dos filas distintas y la misma persona
+queda duplicada en la cartera. Por eso los SPs que validan o buscan por documento
+normalizan **antes** de comparar (`sp_cliente_crear`, `sp_users_crear`,
+`sp_proveedor_guardar`, `sp_empresa_crear`): si validaran el texto crudo,
+`12.345.678` se rechazaría por «no son 8 dígitos» y además esquivaría el chequeo
+de duplicado, que compara contra valores ya normalizados.
+
+El backend hace su parte antes de validar el DTO (`SanearEntradaPipe`): recorta,
+colapsa espacios y convierte `""` en `null`. No toca contraseñas ni campos de
+texto libre clínico, donde el espacio es parte del contenido.
+
 ## Triggers
 
 | Trigger | Qué garantiza |
 |---|---|
 | `tg_*_updated_at` | `updated_at` correcto sin que cada SP se acuerde. |
-| `trg_users_validate_rol_scope` | Un rol global no puede quedar anclado a una sede. |
+| `trg_users_validate_rol_scope` | Un rol global no puede quedar anclado a una empresa. |
 | `tg_movimiento_aplicar_stock` | Stock, lote y denormalizado siempre coherentes con el kardex. |
 | `tg_consulta_sync_peso` | El peso de la ficha es el de la última consulta. |
 | `tg_mascota_fallecida` | Suspende tratamientos, cancela citas futuras y apaga recordatorios. |
 | `tg_comprobante_recalcular` | Los totales de la cabecera siempre cuadran con sus ítems. |
 | `tg_asistencia_horas` | Calcula horas trabajadas al marcar la salida. |
+| `tg_*_normalizar` | Documentos, nombres, teléfonos, correos y códigos guardados en una sola forma. |

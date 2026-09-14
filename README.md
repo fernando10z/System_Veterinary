@@ -37,13 +37,19 @@ Todas con contraseña **`Demo2026!`**:
 
 | Correo | Rol | Alcance |
 |---|---|---|
-| `admin@vetpatitas.pe` | Super administrador | Todas las sedes |
-| `gerencia@vetpatitas.pe` | Gerencia | Todas las sedes (solo lectura) |
-| `administracion@vetpatitas.pe` | Administrador de empresa | Vet Patitas Miraflores |
-| `jperez@vetpatitas.pe` | Veterinario | Miraflores |
-| `mrojas@vetpatitas.pe` | Veterinario (cirugía) | Miraflores |
-| `recepcion@vetpatitas.pe` | Recepción | Miraflores |
-| `almacen@vetpatitas.pe` | Almacén | Miraflores |
+| `admin@vetpatitas.pe` | Super administrador | Todas las empresas |
+| `gerencia@vetpatitas.pe` | Gerencia | Todas las empresas (solo lectura) |
+| `administracion@vetpatitas.pe` | Administrador de empresa | Vet Patitas |
+| `jperez@vetpatitas.pe` | Veterinario | Vet Patitas |
+| `mrojas@vetpatitas.pe` | Veterinario (cirugía) | Vet Patitas |
+| `recepcion@vetpatitas.pe` | Recepción | Vet Patitas |
+| `almacen@vetpatitas.pe` | Almacén | Vet Patitas |
+| `administracion@vethuellitas.pe` | Administrador de empresa | Vet Huellitas |
+| `dvaldez@vethuellitas.pe` | Veterinario | Vet Huellitas |
+| `recepcion@vethuellitas.pe` | Recepción | Vet Huellitas |
+
+Los dos últimos bloques son negocios **distintos**, no sedes: entrar con uno y
+otro es la forma más rápida de ver el aislamiento de cartera funcionando.
 
 Portal del propietario (`/portal/login`): documento `44556677` o `41223344`,
 contraseña `Mascota2026!`.
@@ -61,6 +67,7 @@ contraseña `Mascota2026!`.
 | Capas por módulo | `controller + service + repository + dto/` | Sin `domain/application/infrastructure`: no aportan cuando la lógica está en SPs. |
 | Multi-tenancy | Columna `empresa_id` resuelta en SPs | El backend solo propaga `(user_id, empresa_id, is_super_admin)`. 46 de 60 tablas la llevan. |
 | Cartera | Clientes y pacientes son **de cada empresa** | Son negocios independientes: el documento es único por empresa, no globalmente. Ver [ADR-002](docs/decisions/002-cartera-por-empresa.md). |
+| Normalización | Triggers `BEFORE INSERT/UPDATE` en la base | Documentos, nombres, teléfonos y correos se guardan en una sola forma, entren por donde entren. Ver [ADR-004](docs/decisions/004-normalizacion-en-la-base.md). |
 | Historia clínica | Línea de tiempo única (`core.historia_clinica`) | Un solo SELECT ordenado devuelve consultas, vacunas, cirugías y notas del paciente. |
 | Movimiento de stock | Puerta única `internal.mover_stock` + trigger | Un solo camino toca el inventario: no hay descuadres entre el kardex y el saldo. |
 | Auth backoffice | JWT access (15 m) + refresh (7 d, whitelist en Redis) | Permite revocar una sesión concreta sin esperar a que expire. |
@@ -138,7 +145,7 @@ System_VeterinaryERP/
 
 | Módulo | Qué resuelve |
 |---|---|
-| **Agenda** | Tablero por estado (programada → confirmada → en sala → en atención → atendida), cálculo de huecos libres por veterinario cruzando horario de sede, turnos y permisos aprobados. Bloquea solapamientos. |
+| **Agenda** | Tablero por estado (programada → confirmada → en sala → en atención → atendida), cálculo de huecos libres por veterinario cruzando horario de la empresa, turnos y permisos aprobados. Bloquea solapamientos. |
 | **Pacientes** | Ficha clínica con alertas de alergias, curva de peso, carné de vacunación y línea de tiempo unificada. |
 | **Propietarios** | Cartera privada de cada empresa, con deuda, mascotas vinculadas y bitácora de contactos. |
 | **Historia clínica** | Consulta con estructura SOAP y constantes fisiológicas, cierre firmado e inmutable, cirugías con consentimiento obligatorio, hospitalización con evoluciones por turno, exámenes y documentos. |
@@ -169,13 +176,16 @@ Están en los SPs, no en la UI, así que ningún cliente puede saltárselas:
 - Al **anular un comprobante**, sus servicios e insumos vuelven a quedar pendientes de cobro.
 - Un **paciente con historia clínica** no se elimina: se marca inactivo y la historia se conserva.
 - Marcar una mascota como **fallecida** suspende sus tratamientos, cancela sus citas futuras y apaga sus recordatorios.
-- Nadie **aprueba su propio permiso** ni cambia el estado de su propia cuenta.
+- Nadie **aprueba su propio permiso**, cambia el estado de su propia cuenta ni **se cambia el rol a sí mismo**.
+- Solo un **super admin** puede asignar o crear roles de alcance global. Un administrador de empresa que lo intente —sobre sí mismo o sobre un colega— recibe `403`.
+- Un **cobro en efectivo exige caja abierta**: sin ella el billete no generaría movimiento y no habría nada que cuadrar en el arqueo. Los medios que van al banco (tarjeta, transferencia, yape) no la necesitan.
 - Un rol de **alcance global** no puede estar anclado a una empresa (trigger).
 - Un usuario **no puede alcanzar datos de otra empresa** aunque conozca el id. Todo SP
   que recibe un id comprueba la pertenencia con `internal.es_de_empresa` y responde
   `NOT_FOUND` si no corresponde — no `FORBIDDEN`, para no revelar que el registro
-  existe en otra empresa. Verificado con 39 intentos de acceso cruzado (lectura,
-  edición, anulación, movimientos de stock y de caja): todos bloqueados.
+  existe en otra empresa. Verificado con `scripts/verificar-api.sh`: 115
+  comprobaciones, 0 fallos, incluidos los intentos de acceso cruzado y de
+  escalada de privilegios.
 
 ---
 
@@ -202,9 +212,26 @@ tiene `EXECUTE` sobre `app.*`, sin acceso directo a las tablas).
 
 ---
 
+### Verificar que todo sigue en pie
+
+```bash
+bash scripts/verificar-api.sh     # 115 comprobaciones: rutas, aislamiento, escalada, normalización
+bash scripts/flujo-clinico.sh     # flujo completo: cita → consulta → boleta → cobro → caja
+```
+
+`verificar-api.sh` no solo prueba que las rutas respondan: **intenta romper el
+aislamiento**. Se autentica como administrador de la empresa 2 y trata de leer,
+editar y borrar registros y usuarios de la empresa 1, y de ascenderse a un rol
+global. Todos esos intentos deben ser rechazados; si alguno pasa, el script lo
+reporta como fallo.
+
+Esa forma de probar no es un lujo. Las últimas once fugas entre empresas que se
+corrigieron **no se veían leyendo el código**: cada SP parecía correcto por
+separado y solo aparecieron al atacarlos con un token de la otra empresa.
+
 ## 7. Dar de alta una empresa nueva
 
-Desde **Configuración → Sede → Nueva sede** (solo super admin), o por API
+Desde **Configuración → Empresa → Nueva empresa** (solo super admin), o por API
 `POST /api/empresas`. Al crearla se aprovisionan su almacén principal y un primer
 consultorio. Después hay que cargarle lo suyo, porque **no hereda nada** de las
 demás: horario de atención, servicios, productos y usuarios. La taxonomía de

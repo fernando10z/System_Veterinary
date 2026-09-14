@@ -46,7 +46,7 @@ export const portalApi = {
       method: "POST",
       body: { documento, password },
     });
-    localStorage.setItem(PORTAL_TOKEN_KEY, r.data.accessToken);
+    localStorage.setItem(PORTAL_TOKEN_KEY, r.data.access_token);
     localStorage.setItem(PORTAL_CLIENTE_KEY, JSON.stringify(r.data.cliente));
     return r.data;
   },
@@ -68,9 +68,9 @@ export const portalApi = {
   historial: (mascotaId) => portalFetch(`/portal/mascotas/${mascotaId}/historial`),
   misComprobantes: () => portalFetch("/portal/mis-comprobantes"),
   solicitarCita: (payload) => portalFetch("/portal/citas", { method: "POST", body: payload }),
-  cambiarPassword: (passwordActual, passwordNuevo) =>
+  cambiarPassword: (password_actual, password_nuevo) =>
     portalFetch("/portal/cambiar-password", {
       method: "POST",
-      body: { passwordActual, passwordNuevo },
+      body: { password_actual, password_nuevo },
     }),
 };

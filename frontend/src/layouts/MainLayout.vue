@@ -20,7 +20,8 @@ const { isCollapsed } = useSidebar();
 
 <style scoped>
 /* El layout se maneja desde globals.css:
-   - .sidebar es position:fixed → no scrollea con el body
-   - .main lleva margin-left para hacerle espacio (244px / 64px collapsed)
+   - .app es un grid de 2 columnas (sidebar + contenido) centrado en --ancho-app
+   - .sidebar es sticky con height:100vh → no scrollea con el body
+   - .page centra el contenido en --ancho-contenido
 */
 </style>

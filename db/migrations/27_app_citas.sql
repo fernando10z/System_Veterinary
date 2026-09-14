@@ -59,7 +59,7 @@ BEGIN
            -- Paciente
            c.mascota_id, m.nombre AS mascota, m.foto_url AS mascota_foto,
            m.alergias, m.sexo AS mascota_sexo, m.peso_kg,
-           esp.nombre AS especie, COALESCE(r.nombre, m.raza_libre) AS raza,
+           esp.nombre AS especie, r.nombre AS raza,
            internal.edad_mascota(m.fecha_nacimiento, m.edad_aproximada_meses) AS edad,
            -- Propietario
            c.cliente_id,
@@ -494,7 +494,7 @@ BEGIN
     SELECT c.*,
            m.nombre AS mascota, m.foto_url AS mascota_foto, m.alergias,
            m.condiciones_cronicas, m.peso_kg,
-           esp.nombre AS especie, COALESCE(r.nombre, m.raza_libre) AS raza,
+           esp.nombre AS especie, r.nombre AS raza,
            internal.edad_mascota(m.fecha_nacimiento, m.edad_aproximada_meses) AS edad,
            trim(cl.nombres || ' ' || COALESCE(cl.apellido_paterno,'')) AS cliente,
            cl.telefono AS cliente_telefono, cl.correo AS cliente_correo,

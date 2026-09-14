@@ -187,4 +187,6 @@
 .inline { display: inline-flex; align-items: center; gap: 6px; }
 .wrap-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .text-right { text-align: right; }
-.grow { flex: 1; }
+/* min-width:0 es parte del patrón: sin él un hijo flex con texto largo no
+   encoge por debajo de su contenido y empuja a sus hermanos fuera del padding. */
+.grow { flex: 1; min-width: 0; }

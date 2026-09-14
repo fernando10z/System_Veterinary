@@ -2,5 +2,5 @@ import { IsOptional, IsString } from "class-validator";
 
 export class RefreshDto {
   @IsOptional() @IsString()
-  refreshToken!: string;
+  refresh_token!: string;
 }

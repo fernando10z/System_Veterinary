@@ -160,8 +160,10 @@ INSERT INTO core.especies (codigo, nombre, nombre_cria, icono) VALUES
   ('OTRO',     'Otro',     'Cría',     'PawPrint')
 ON CONFLICT (codigo) DO NOTHING;
 
-INSERT INTO core.razas (especie_id, nombre, tamanio_referencia, peso_min_kg, peso_max_kg, esperanza_vida)
-SELECT e.id, r.nombre, r.tam::core.tamanio_mascota, r.pmin, r.pmax, r.vida
+-- Razas del catálogo global: empresa_id NULL. Cada empresa puede agregar las
+-- suyas después desde Configuración → Catálogos.
+INSERT INTO core.razas (especie_id, empresa_id, nombre, tamanio_referencia, peso_min_kg, peso_max_kg, esperanza_vida)
+SELECT e.id, NULL, r.nombre, r.tam::core.tamanio_mascota, r.pmin, r.pmax, r.vida
 FROM core.especies e
 JOIN (VALUES
   ('CANINO','Mestizo',            'mediano',  5.0, 30.0, 14),
@@ -199,7 +201,9 @@ JOIN (VALUES
   ('REPTIL','Tortuga terrestre',  'pequenio', 0.5,  5.0,  50),
   ('REPTIL','Iguana',             'mediano',  1.0,  8.0,  15)
 ) AS r(especie, nombre, tam, pmin, pmax, vida) ON r.especie = e.codigo
-ON CONFLICT (especie_id, nombre) DO NOTHING;
+-- El índice es parcial (solo las globales): la cláusula WHERE es obligatoria
+-- para que Postgres pueda inferirlo.
+ON CONFLICT (especie_id, lower(nombre)) WHERE empresa_id IS NULL DO NOTHING;
 
 -- =============================================================================
 -- 4. SEDE DEMO + USUARIOS + CATÁLOGOS OPERATIVOS
@@ -231,7 +235,7 @@ BEGIN
     serie_factura_default, serie_boleta_default, serie_nota_venta_default,
     aforo_consultorios, duracion_cita_min)
   VALUES (
-    '20601234567', 'Clínica Veterinaria Patitas S.A.C.', 'Vet Patitas — Miraflores',
+    '20601234567', 'Clínica Veterinaria Patitas S.A.C.', 'Vet Patitas',
     'Av. Larco 1234, Miraflores', '150122', '014455667', 'contacto@vetpatitas.pe',
     'F001', 'B001', 'NV01', 3, 30)
   ON CONFLICT (ruc) DO UPDATE SET razon_social = EXCLUDED.razon_social
@@ -241,8 +245,8 @@ BEGIN
     ruc, razon_social, nombre_comercial, direccion_fiscal, ubigeo, telefono, correo,
     serie_factura_default, serie_boleta_default, aforo_consultorios, duracion_cita_min)
   VALUES (
-    '20609876543', 'Clínica Veterinaria Patitas S.A.C.', 'Vet Patitas — San Isidro',
-    'Av. Javier Prado Este 456, San Isidro', '150131', '014455668', 'sanisidro@vetpatitas.pe',
+    '20609876543', 'Centro Veterinario Huellitas E.I.R.L.', 'Vet Huellitas',
+    'Av. Javier Prado Este 456, San Isidro', '150131', '014455668', 'contacto@vethuellitas.pe',
     'F002', 'B002', 2, 30)
   ON CONFLICT (ruc) DO UPDATE SET razon_social = EXCLUDED.razon_social
   RETURNING id INTO v_emp2;
@@ -483,6 +487,44 @@ BEGIN
   FROM core.productos p
   WHERE p.empresa_id = v_emp
     AND NOT EXISTS (SELECT 1 FROM core.movimientos_inventario mv WHERE mv.producto_id = p.id);
+
+
+  -- ---- Usuarios de la empresa 2 ---------------------------------------------
+  -- Sin usuarios propios la empresa 2 no sería operable: solo entraría el
+  -- super_admin, y entonces la demo no probaría el aislamiento real (que es
+  -- justamente lo que se quiere mostrar).
+  INSERT INTO core.users (
+    codigo, email, password_hash, nombres, apellido_paterno, apellido_materno,
+    tipo_documento, numero_documento, telefono, empresa_id, rol_id,
+    es_veterinario, colegiatura, especializacion_id, color_agenda, estado)
+  VALUES (
+    'USR-0101', 'administracion@vethuellitas.pe', crypt('Demo2026!', gen_salt('bf', 10)),
+    'Carmen', 'Ibáñez', 'Delgado', 'DNI', '10000101', '999000101',
+    v_emp2, (SELECT id FROM core.roles WHERE codigo = 'admin_empresa'),
+    false, NULL, NULL, '#2D7EE5', 'activo')
+  ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash;
+
+  INSERT INTO core.users (
+    codigo, email, password_hash, nombres, apellido_paterno, apellido_materno,
+    tipo_documento, numero_documento, telefono, empresa_id, rol_id,
+    es_veterinario, colegiatura, especializacion_id, color_agenda, estado)
+  VALUES (
+    'USR-0102', 'dvaldez@vethuellitas.pe', crypt('Demo2026!', gen_salt('bf', 10)),
+    'Diego', 'Valdez', 'Cornejo', 'DNI', '10000102', '999000102',
+    v_emp2, (SELECT id FROM core.roles WHERE codigo = 'veterinario'),
+    true, 'CMVP-7755',
+    (SELECT id FROM core.especializaciones WHERE codigo = 'MEDICINA_GENERAL'),
+    '#07B162', 'activo')
+  ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash;
+
+  INSERT INTO core.users (
+    codigo, email, password_hash, nombres, apellido_paterno, apellido_materno,
+    tipo_documento, numero_documento, telefono, empresa_id, rol_id, color_agenda, estado)
+  VALUES (
+    'USR-0103', 'recepcion@vethuellitas.pe', crypt('Demo2026!', gen_salt('bf', 10)),
+    'Sofía', 'Ramírez', 'Ochoa', 'DNI', '10000103', '999000103',
+    v_emp2, (SELECT id FROM core.roles WHERE codigo = 'recepcion'), '#E89A1F', 'activo')
+  ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash;
 
   -- ---------------------------------------------------------------------------
   -- EMPRESA 2: catálogo propio

@@ -291,7 +291,7 @@ onMounted(cargar);
 </script>
 
 <style scoped>
-.rep-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+.rep-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-paneles); margin-bottom: 16px; align-items: start; }
 @media (max-width: 1000px) { .rep-cols { grid-template-columns: 1fr; } }
 
 .margen { display: flex; flex-direction: column; gap: 8px; }

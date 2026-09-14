@@ -56,7 +56,7 @@ BEGIN
            m.alergias, m.condiciones_cronicas, m.estado, m.created_at,
            internal.edad_mascota(m.fecha_nacimiento, m.edad_aproximada_meses) AS edad,
            m.especie_id, e.nombre AS especie, e.icono AS especie_icono,
-           m.raza_id, COALESCE(r.nombre, m.raza_libre) AS raza,
+           m.raza_id, r.nombre AS raza,
            m.cliente_id,
            trim(c.nombres || ' ' || COALESCE(c.apellido_paterno,'') || ' ' ||
                 COALESCE(c.apellido_materno,'')) AS propietario,
@@ -126,7 +126,7 @@ BEGIN
            m.estado, m.fecha_fallecimiento, m.created_at,
            internal.edad_mascota(m.fecha_nacimiento, m.edad_aproximada_meses) AS edad,
            m.especie_id, e.nombre AS especie, e.icono AS especie_icono,
-           m.raza_id, COALESCE(r.nombre, m.raza_libre) AS raza,
+           m.raza_id, r.nombre AS raza,
            r.esperanza_vida,
            -- Propietario
            jsonb_build_object(
@@ -300,7 +300,7 @@ BEGIN
   END IF;
 
   INSERT INTO core.mascotas (
-    empresa_id, codigo, cliente_id, nombre, especie_id, raza_id, raza_libre, sexo, color,
+    empresa_id, codigo, cliente_id, nombre, especie_id, raza_id, sexo, color,
     senias_particulares, fecha_nacimiento, edad_aproximada_meses, peso_kg, tamanio,
     esterilizado, fecha_esterilizacion, microchip, num_placa, foto_url,
     alergias, condiciones_cronicas, observaciones, created_by
@@ -311,7 +311,6 @@ BEGIN
     p_payload->>'nombre',
     (p_payload->>'especie_id')::uuid,
     NULLIF(p_payload->>'raza_id','')::uuid,
-    NULLIF(p_payload->>'raza_libre',''),
     COALESCE((p_payload->>'sexo')::core.sexo_mascota, 'desconocido'),
     p_payload->>'color',
     p_payload->>'senias_particulares',
@@ -382,7 +381,6 @@ BEGIN
     nombre               = COALESCE(p_payload->>'nombre', nombre),
     especie_id           = COALESCE(NULLIF(p_payload->>'especie_id','')::uuid, especie_id),
     raza_id              = COALESCE(NULLIF(p_payload->>'raza_id','')::uuid, raza_id),
-    raza_libre           = COALESCE(p_payload->>'raza_libre', raza_libre),
     sexo                 = COALESCE((p_payload->>'sexo')::core.sexo_mascota, sexo),
     color                = COALESCE(p_payload->>'color', color),
     senias_particulares  = COALESCE(p_payload->>'senias_particulares', senias_particulares),
@@ -575,7 +573,7 @@ BEGIN
     SELECT me.id, me.fecha_extravio, me.zona, me.descripcion, me.contacto,
            me.recompensa, me.encontrado, me.fecha_hallazgo,
            m.id AS mascota_id, m.nombre AS mascota, m.foto_url, m.microchip,
-           e.nombre AS especie, COALESCE(r.nombre, m.raza_libre) AS raza,
+           e.nombre AS especie, r.nombre AS raza,
            trim(c.nombres || ' ' || COALESCE(c.apellido_paterno,'')) AS propietario,
            c.telefono AS propietario_telefono
     FROM core.mascotas_extraviadas me

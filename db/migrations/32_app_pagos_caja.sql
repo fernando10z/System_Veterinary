@@ -61,6 +61,17 @@ BEGIN
     v_caja := (p_payload->>'caja_id')::uuid;
   END IF;
 
+  -- El efectivo SÍ exige caja abierta. Un cobro en efectivo sin caja no genera
+  -- movimiento y por tanto no aparece en ningún arqueo: el billete entra al
+  -- cajón y no hay nada contra qué cuadrarlo. Los medios que van al banco
+  -- (tarjeta, transferencia, yape…) no necesitan caja.
+  IF COALESCE((p_payload->>'metodo')::core.metodo_pago, 'efectivo') = 'efectivo'
+     AND v_caja IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(
+      'BUSINESS_RULE',
+      'Para cobrar en efectivo necesitas una caja abierta', 'caja_id'));
+  END IF;
+
   INSERT INTO core.pagos (
     empresa_id, cliente_id, caja_id, numero, metodo, monto, moneda,
     referencia, fecha_pago, observaciones, created_by

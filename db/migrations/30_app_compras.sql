@@ -94,7 +94,7 @@ AS $$
 DECLARE
   v_id  UUID := NULLIF(p_payload->>'id','')::uuid;
   v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
-  v_doc TEXT := p_payload->>'numero_documento';
+  v_doc TEXT := internal.normalizar_documento(p_payload->>'numero_documento');
   v_tipo core.tipo_documento_identidad :=
     COALESCE((p_payload->>'tipo_documento')::core.tipo_documento_identidad, 'RUC');
 BEGIN

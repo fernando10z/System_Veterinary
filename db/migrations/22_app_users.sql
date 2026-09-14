@@ -157,8 +157,9 @@ DECLARE
   v_emp       UUID;
   v_scope     core.scope_rol;
   v_rol_id    UUID := NULLIF(p_payload->>'rol_id','')::uuid;
-  v_email     TEXT := lower(trim(p_payload->>'email'));
-  v_doc       TEXT := p_payload->>'numero_documento';
+  v_email     TEXT := internal.normalizar_correo(p_payload->>'email');
+  -- Normalizado antes de validar y de comparar contra lo ya guardado.
+  v_doc       TEXT := internal.normalizar_documento(p_payload->>'numero_documento');
   v_tipo_doc  core.tipo_documento_identidad := COALESCE((p_payload->>'tipo_documento')::core.tipo_documento_identidad, 'DNI');
   v_es_vet    BOOLEAN := COALESCE((p_payload->>'es_veterinario')::boolean, false);
 BEGIN
@@ -196,6 +197,16 @@ BEGIN
 
   -- La empresa se deriva del scope del rol: global ⇒ NULL, empresa ⇒ obligatoria.
   SELECT scope INTO v_scope FROM core.roles WHERE id = v_rol_id;
+
+  -- Un rol de alcance global da acceso a TODAS las empresas. Solo un super admin
+  -- puede concederlo: sin esto, el administrador de una empresa se crearía un
+  -- usuario super_admin y se llevaría la instalación entera.
+  IF v_scope IN ('global','global_restricted') AND NOT p_is_super_admin THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('FORBIDDEN',
+        'Solo un super administrador puede crear usuarios con alcance global','rol_id'));
+  END IF;
+
   IF v_scope IN ('global','global_restricted') THEN
     v_emp := NULL;
   ELSE
@@ -328,11 +339,19 @@ BEGIN
       'error', internal.error_jsonb('BUSINESS_RULE','No puedes cambiar el estado de tu propia cuenta'));
   END IF;
 
-  SELECT empresa_id INTO v_emp FROM core.users WHERE id = p_id AND deleted_at IS NULL;
-  IF NOT FOUND THEN
+  -- El usuario destino debe ser de la misma empresa. Un administrador lo es de SU
+  -- empresa: sin esta comprobación podría tomar la cuenta de otra con solo el UUID.
+  IF NOT EXISTS (
+      SELECT 1 FROM core.users u
+       WHERE u.id = p_id AND u.deleted_at IS NULL
+         AND (p_is_super_admin
+              OR (u.empresa_id IS NOT NULL
+                  AND u.empresa_id = internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin)))) THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Usuario no encontrado'));
   END IF;
+
+  SELECT empresa_id INTO v_emp FROM core.users WHERE id = p_id AND deleted_at IS NULL;
 
   UPDATE core.users
      SET estado = p_estado::core.estado_user,
@@ -382,10 +401,34 @@ BEGIN
     PERFORM internal.assert_permiso(p_user_id, 'usuarios:asignar_rol');
   END IF;
 
+  -- Nadie cambia su propio rol: sería auto-concederse permisos.
+  IF p_id = p_user_id THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('BUSINESS_RULE','No puedes cambiar tu propio rol'));
+  END IF;
+
   SELECT scope INTO v_scope FROM core.roles WHERE id = p_rol_id;
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Rol no encontrado','rol_id'));
+  END IF;
+
+  -- Conceder alcance global es entregar toda la instalación: solo el super admin.
+  IF v_scope IN ('global','global_restricted') AND NOT p_is_super_admin THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('FORBIDDEN',
+        'Solo un super administrador puede asignar roles de alcance global','rol_id'));
+  END IF;
+
+  -- El usuario destino debe ser de la empresa de quien opera.
+  IF NOT EXISTS (
+      SELECT 1 FROM core.users u
+       WHERE u.id = p_id AND u.deleted_at IS NULL
+         AND (p_is_super_admin
+              OR (u.empresa_id IS NOT NULL
+                  AND u.empresa_id = internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin)))) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Usuario no encontrado'));
   END IF;
 
   IF v_scope IN ('global','global_restricted') THEN
@@ -441,6 +484,18 @@ AS $$
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'usuarios:editar');
 
+  -- El usuario destino debe ser de la misma empresa. Un administrador lo es de SU
+  -- empresa: sin esta comprobación podría tomar la cuenta de otra con solo el UUID.
+  IF NOT EXISTS (
+      SELECT 1 FROM core.users u
+       WHERE u.id = p_id AND u.deleted_at IS NULL
+         AND (p_is_super_admin
+              OR (u.empresa_id IS NOT NULL
+                  AND u.empresa_id = internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin)))) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Usuario no encontrado'));
+  END IF;
+
   IF length(p_password_temp) < 8 THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('VALIDATION_ERROR',
@@ -493,6 +548,19 @@ BEGIN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('BUSINESS_RULE','No puedes eliminar tu propia cuenta'));
   END IF;
+
+  -- El usuario destino debe ser de la misma empresa. Un administrador lo es de SU
+  -- empresa: sin esta comprobación podría tomar la cuenta de otra con solo el UUID.
+  IF NOT EXISTS (
+      SELECT 1 FROM core.users u
+       WHERE u.id = p_id AND u.deleted_at IS NULL
+         AND (p_is_super_admin
+              OR (u.empresa_id IS NOT NULL
+                  AND u.empresa_id = internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin)))) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Usuario no encontrado'));
+  END IF;
+
 
   -- Un veterinario con historia clínica firmada no se borra: se desactiva,
   -- o la trazabilidad del acto médico queda huérfana.

@@ -5,12 +5,16 @@
 -- No tiene acceso directo a core: si un SP no expone algo, el backend no lo ve.
 -- =============================================================================
 
+-- El rol se crea SIN contraseña utilizable: una aleatoria que nadie conoce.
+-- Así, si alguien despliega y olvida el paso del deploy, el rol no queda con una
+-- contraseña adivinable — simplemente no se puede usar hasta fijarla:
+--   ALTER ROLE vet_app_user WITH PASSWORD '<secreto del gestor de credenciales>';
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vet_app_user') THEN
-    -- La contraseña real se fija en el deploy:
-    --   ALTER ROLE vet_app_user WITH PASSWORD '...';
-    CREATE ROLE vet_app_user LOGIN PASSWORD 'cambiar_en_deploy';
+    EXECUTE format(
+      'CREATE ROLE vet_app_user LOGIN PASSWORD %L',
+      encode(gen_random_bytes(32), 'base64'));
   END IF;
 END $$;
 

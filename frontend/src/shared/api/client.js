@@ -26,12 +26,12 @@ async function tryRefresh() {
       const r = await fetch(`${API_BASE_URL}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: refresh }),
+        body: JSON.stringify({ refresh_token: refresh }),
       });
       const j = await r.json();
       if (!r.ok || !j.ok) return null;
-      setTokens(j.data.accessToken, j.data.refreshToken);
-      return j.data.accessToken;
+      setTokens(j.data.access_token, j.data.refresh_token);
+      return j.data.access_token;
     } catch {
       return null;
     } finally {

@@ -84,7 +84,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.sidebar { transition: width 0.2s ease, padding 0.2s ease; }
+/* El ancho lo fija la columna del grid en .app (ver globals.css). */
+.sidebar { transition: padding 0.2s ease; }
 .sidebar.is-collapsed { padding: 14px 8px; }
 
 .brand-text { flex: 1; min-width: 0; }

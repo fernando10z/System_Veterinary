@@ -9,9 +9,9 @@ export const usersApi = {
   actualizar: (id, payload) => apiFetch(`/users/${id}`, { method: "PATCH", body: payload }),
   cambiarEstado: (id, estado) =>
     apiFetch(`/users/${id}/estado`, { method: "PATCH", body: { estado } }),
-  cambiarRol: (id, rolId, empresaId) =>
-    apiFetch(`/users/${id}/rol`, { method: "PATCH", body: { rolId, empresaId } }),
-  resetPassword: (id, passwordTemp) =>
-    apiFetch(`/users/${id}/reset-password`, { method: "POST", body: { passwordTemp } }),
+  cambiarRol: (id, rol_id, empresa_id) =>
+    apiFetch(`/users/${id}/rol`, { method: "PATCH", body: { rol_id, empresa_id } }),
+  resetPassword: (id, password_temp) =>
+    apiFetch(`/users/${id}/reset-password`, { method: "POST", body: { password_temp } }),
   eliminar: (id) => apiFetch(`/users/${id}`, { method: "DELETE" }),
 };

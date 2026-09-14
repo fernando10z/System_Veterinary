@@ -10,6 +10,7 @@ import fastifyCors from "@fastify/cors";
 import fastifyHelmet from "@fastify/helmet";
 import { AppModule } from "./app.module";
 import { mensajesValidacionES } from "./common/validation-messages";
+import { SanearEntradaPipe } from "./common/pipes/sanear-entrada.pipe";
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -75,6 +76,9 @@ async function bootstrap() {
   });
 
   app.useGlobalPipes(
+    // El saneo va primero: valida sobre el dato ya limpio, no sobre lo que se
+    // pegó desde un Excel.
+    new SanearEntradaPipe(),
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: false,

@@ -34,6 +34,6 @@ validación **de negocio**.
 
 - Convención uniforme `{ok, data, error, meta}` en todos los SPs, y un único executor
   que la desempaqueta y mapea a HTTP.
-- Helpers en `internal` para lo repetitivo (acceso por sede, auditoría, correlativos,
+- Helpers en `internal` para lo repetitivo (acceso por empresa, auditoría, correlativos,
   movimiento de stock).
 - Migraciones idempotentes y numeradas, aplicadas en orden byte a byte.

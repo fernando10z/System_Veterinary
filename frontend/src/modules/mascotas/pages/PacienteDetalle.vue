@@ -364,7 +364,7 @@ watch(() => route.params.id, cargar);
 </script>
 
 <style scoped>
-.ficha-grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+.ficha-grid { display: grid; grid-template-columns: 320px 1fr; gap: var(--gap-paneles); align-items: start; }
 @media (max-width: 1000px) { .ficha-grid { grid-template-columns: 1fr; } }
 .col-izq, .col-der { display: flex; flex-direction: column; gap: 16px; }
 

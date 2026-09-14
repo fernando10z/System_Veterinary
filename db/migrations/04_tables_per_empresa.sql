@@ -81,7 +81,6 @@ CREATE TABLE IF NOT EXISTS core.mascotas (
   nombre              VARCHAR(100) NOT NULL,
   especie_id          UUID NOT NULL REFERENCES core.especies(id),
   raza_id             UUID REFERENCES core.razas(id),
-  raza_libre          VARCHAR(120),              -- cuando la raza no está en catálogo (mestizo)
   sexo                core.sexo_mascota NOT NULL DEFAULT 'desconocido',
   color               VARCHAR(80),
   senias_particulares TEXT,

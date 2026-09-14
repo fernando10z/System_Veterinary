@@ -24,7 +24,7 @@ BEGIN
            m.esterilizado, m.microchip, m.estado, m.alergias,
            internal.edad_mascota(m.fecha_nacimiento, m.edad_aproximada_meses) AS edad,
            e.nombre AS especie, e.icono AS especie_icono,
-           COALESCE(r.nombre, m.raza_libre) AS raza,
+           r.nombre AS raza,
            (SELECT jsonb_build_object('fecha_hora', c.fecha_hora, 'motivo', c.motivo,
                                       'estado', c.estado)
               FROM core.citas c

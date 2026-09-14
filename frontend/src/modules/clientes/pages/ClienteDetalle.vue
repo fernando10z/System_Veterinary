@@ -399,7 +399,7 @@ watch(() => route.params.id, cargar);
 </script>
 
 <style scoped>
-.det-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
+.det-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: var(--gap-paneles); align-items: start; }
 @media (max-width: 1050px) { .det-grid { grid-template-columns: 1fr; } }
 .col { display: flex; flex-direction: column; gap: 16px; }
 

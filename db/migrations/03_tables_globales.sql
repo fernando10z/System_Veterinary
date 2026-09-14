@@ -163,9 +163,17 @@ CREATE TABLE IF NOT EXISTS core.especies (
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Las razas son taxonomía global (empresa_id NULL, la mantiene el operador del
+-- ERP) que cada empresa puede EXTENDER con las suyas (empresa_id NOT NULL).
+--
+-- Sin esa extensión haría falta un campo de texto libre en cada mascota para las
+-- razas fuera de catálogo, y esa columna sería una segunda representación del
+-- mismo concepto: dos "Border Collie" escritos distinto no se agrupan, no se
+-- pueden contar y no comparten peso ni esperanza de vida de referencia.
 CREATE TABLE IF NOT EXISTS core.razas (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   especie_id        UUID NOT NULL REFERENCES core.especies(id) ON DELETE CASCADE,
+  empresa_id        UUID REFERENCES core.empresas(id) ON DELETE CASCADE,
   nombre            VARCHAR(120) NOT NULL,
   tamanio_referencia core.tamanio_mascota,
   peso_min_kg       NUMERIC(6,2),
@@ -173,10 +181,18 @@ CREATE TABLE IF NOT EXISTS core.razas (
   esperanza_vida    INT,               -- años, para alertas geriátricas
   estado            core.estado_generico NOT NULL DEFAULT 'activo',
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT uq_razas_especie_nombre UNIQUE (especie_id, nombre)
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_razas_especie ON core.razas (especie_id);
+CREATE INDEX IF NOT EXISTS ix_razas_empresa ON core.razas (empresa_id) WHERE empresa_id IS NOT NULL;
+
+-- Unicidad case-insensitive: "border collie" y "Border Collie" son la misma raza.
+-- Se separa en dos índices porque una empresa puede llamar igual a una raza suya
+-- que a una global sin colisionar con las demás empresas.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_razas_globales
+  ON core.razas (especie_id, lower(nombre)) WHERE empresa_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_razas_por_empresa
+  ON core.razas (empresa_id, especie_id, lower(nombre)) WHERE empresa_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- audit_log — bitácora transversal

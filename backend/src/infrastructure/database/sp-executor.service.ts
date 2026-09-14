@@ -17,6 +17,33 @@ const ERROR_STATUS: Record<string, HttpStatus> = {
   BAD_REQUEST: HttpStatus.BAD_REQUEST,
   CONFLICT: HttpStatus.CONFLICT,
   BUSINESS_RULE: HttpStatus.UNPROCESSABLE_ENTITY,
+
+  // Los helpers de `internal` lanzan excepciones nativas de Postgres y el bloque
+  // EXCEPTION del SP devuelve el SQLSTATE tal cual. Sin estas entradas, un
+  // "sin acceso a la empresa" llegaba al cliente como 422 en vez de 403.
+  "42501": HttpStatus.FORBIDDEN,           // insufficient_privilege
+  P0001: HttpStatus.UNPROCESSABLE_ENTITY,  // raise_exception (regla de negocio)
+  "23505": HttpStatus.CONFLICT,            // unique_violation
+  "23503": HttpStatus.UNPROCESSABLE_ENTITY, // foreign_key_violation
+  "23514": HttpStatus.UNPROCESSABLE_ENTITY, // check_violation
+};
+
+/**
+ * SQLSTATE → código semántico. El cliente no debe recibir "42501": no le dice
+ * nada y filtra que la comprobación vino de Postgres, no de una regla del ERP.
+ */
+const CODIGO_SEMANTICO: Record<string, string> = {
+  "42501": "FORBIDDEN",
+  P0001: "BUSINESS_RULE",
+  "23505": "CONFLICT",
+  "23503": "BUSINESS_RULE",
+  "23514": "VALIDATION_ERROR",
+};
+
+/** Códigos SQLSTATE cuyo mensaje interno no debe llegar al cliente. */
+const MENSAJE_GENERICO: Record<string, string> = {
+  "23503": "La operación afecta a registros relacionados",
+  "23514": "Los datos no cumplen una restricción del sistema",
 };
 
 @Injectable()
@@ -46,16 +73,18 @@ export class SpExecutorService {
       );
     }
     if (!row.ok) {
-      const code = row.error?.code ?? "BUSINESS_RULE";
-      const status = ERROR_STATUS[code] ?? HttpStatus.UNPROCESSABLE_ENTITY;
-      throw new HttpException(
-        {
-          code,
-          message: row.error?.message ?? "Operación rechazada",
-          detail: row.error?.detail,
-        },
-        status,
-      );
+      const bruto = row.error?.code ?? "BUSINESS_RULE";
+      const status = ERROR_STATUS[bruto] ?? HttpStatus.UNPROCESSABLE_ENTITY;
+      // Un SQLSTATE crudo no le dice nada al usuario y describe de dónde salió la
+      // comprobación: se traduce a un código del dominio y, si el mensaje viene
+      // de Postgres, se sustituye por uno entendible.
+      const code = CODIGO_SEMANTICO[bruto] ?? bruto;
+      const message =
+        MENSAJE_GENERICO[bruto] ?? row.error?.message ?? "Operación rechazada";
+      if (CODIGO_SEMANTICO[bruto]) {
+        this.logger.warn(`${fnName} → SQLSTATE ${bruto}: ${row.error?.message}`);
+      }
+      throw new HttpException({ code, message, detail: row.error?.detail }, status);
     }
     return (row.data as T) ?? (row as unknown as T);
   }

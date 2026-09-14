@@ -8,8 +8,6 @@ export class CrearMascotaDto {
   @IsString() @MaxLength(100) nombre!: string;
   @IsUUID() especie_id!: string;
   @IsOptional() @IsUUID() raza_id?: string;
-  /** Para razas fuera de catálogo (mestizos, cruces). */
-  @IsOptional() @IsString() @MaxLength(120) raza_libre?: string;
   @IsOptional() @IsIn(["macho", "hembra", "desconocido"]) sexo?: string;
   @IsOptional() @IsString() @MaxLength(80) color?: string;
   @IsOptional() @IsString() senias_particulares?: string;

@@ -43,14 +43,14 @@ export class AuthService {
     };
 
     const jti = randomUUID();
-    const accessToken = await this.jwt.signAsync(payload, {
+    const access_token = await this.jwt.signAsync(payload, {
       secret: this.config.get<string>("JWT_ACCESS_SECRET"),
       expiresIn: this.config.get<string>("JWT_ACCESS_EXPIRES") ?? "15m",
       issuer: this.config.get<string>("JWT_ISSUER"),
       audience: this.config.get<string>("JWT_AUDIENCE"),
     });
 
-    const refreshToken = await this.jwt.signAsync(
+    const refresh_token = await this.jwt.signAsync(
       { sub: data.user.id, jti },
       {
         secret: this.config.get<string>("JWT_REFRESH_SECRET"),
@@ -62,13 +62,13 @@ export class AuthService {
 
     await this.redis.set(REFRESH_KEY(jti), data.user.id, 7 * 24 * 3600);
 
-    return { accessToken, refreshToken, ...data };
+    return { access_token, refresh_token, ...data };
   }
 
-  async refresh(refreshToken: string) {
+  async refresh(refresh_token: string) {
     let decoded: { sub: string; jti: string };
     try {
-      decoded = await this.jwt.verifyAsync(refreshToken, {
+      decoded = await this.jwt.verifyAsync(refresh_token, {
         secret: this.config.get<string>("JWT_REFRESH_SECRET"),
         issuer: this.config.get<string>("JWT_ISSUER"),
         audience: this.config.get<string>("JWT_AUDIENCE"),
@@ -90,10 +90,10 @@ export class AuthService {
     return this.emitirSesion(data);
   }
 
-  async logout(refreshToken?: string) {
-    if (!refreshToken) return { cerrado: true };
+  async logout(refresh_token?: string) {
+    if (!refresh_token) return { cerrado: true };
     try {
-      const decoded = await this.jwt.verifyAsync<{ jti: string }>(refreshToken, {
+      const decoded = await this.jwt.verifyAsync<{ jti: string }>(refresh_token, {
         secret: this.config.get<string>("JWT_REFRESH_SECRET"),
         issuer: this.config.get<string>("JWT_ISSUER"),
         audience: this.config.get<string>("JWT_AUDIENCE"),
@@ -127,7 +127,7 @@ export class AuthService {
    */
   async portalLogin(documento: string, password: string) {
     const data = await this.repo.portalLogin(documento, password);
-    const accessToken = await this.jwt.signAsync(
+    const access_token = await this.jwt.signAsync(
       { sub: data.cliente.id, type: "portal", email: data.cliente.correo ?? "" },
       {
         secret: this.config.get<string>("JWT_ACCESS_SECRET"),
@@ -136,6 +136,6 @@ export class AuthService {
         audience: this.config.get<string>("JWT_PORTAL_AUDIENCE") ?? "veterp-clientes",
       },
     );
-    return { accessToken, cliente: data.cliente };
+    return { access_token, cliente: data.cliente };
   }
 }

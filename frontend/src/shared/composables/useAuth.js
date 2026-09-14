@@ -63,7 +63,7 @@ async function login(email, password) {
       method: "POST",
       body: { email, password },
     });
-    auth.setTokens(res.data.accessToken, res.data.refreshToken);
+    auth.setTokens(res.data.access_token, res.data.refresh_token);
     const user = decorateUser(res.data.user, res.data.rol);
     const permisos = Array.isArray(res.data.permisos) ? res.data.permisos : [];
     state.user = user;

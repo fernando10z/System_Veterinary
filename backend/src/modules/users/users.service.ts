@@ -31,8 +31,8 @@ export class UsersService {
   cambiarRol(u: JwtPayload, id: string, rolId: string, empresaId?: string | null) {
     return this.repo.cambiarRol(this.ctx(u), id, rolId, empresaId);
   }
-  resetPassword(u: JwtPayload, id: string, passwordTemp: string) {
-    return this.repo.resetPassword(this.ctx(u), id, passwordTemp);
+  resetPassword(u: JwtPayload, id: string, password_temp: string) {
+    return this.repo.resetPassword(this.ctx(u), id, password_temp);
   }
   eliminar(u: JwtPayload, id: string) {
     return this.repo.eliminar(this.ctx(u), id);

@@ -139,7 +139,7 @@ BEGIN
            (SELECT COALESCE(jsonb_agg(jsonb_build_object(
                      'id', m.id, 'codigo', m.codigo, 'nombre', m.nombre,
                      'especie', e.nombre, 'especie_id', m.especie_id,
-                     'raza', COALESCE(r.nombre, m.raza_libre),
+                     'raza', r.nombre,
                      'sexo', m.sexo, 'peso_kg', m.peso_kg, 'foto_url', m.foto_url,
                      'estado', m.estado,
                      'edad', internal.edad_mascota(m.fecha_nacimiento, m.edad_aproximada_meses),
@@ -260,7 +260,10 @@ DECLARE
   v_emp      UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_tipo_doc core.tipo_documento_identidad :=
     COALESCE((p_payload->>'tipo_documento')::core.tipo_documento_identidad, 'DNI');
-  v_doc      TEXT := p_payload->>'numero_documento';
+  -- Se normaliza ANTES de validar y de buscar duplicados: si no, '12.345.678'
+  -- se rechazaría por 'no son 8 dígitos' y esquivaría el chequeo de duplicado
+  -- (los valores guardados sí están normalizados por trigger).
+  v_doc      TEXT := internal.normalizar_documento(p_payload->>'numero_documento');
   v_existente UUID;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clientes:crear');

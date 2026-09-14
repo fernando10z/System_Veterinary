@@ -648,7 +648,7 @@ watch(() => route.params.id, cargar);
 </script>
 
 <style scoped>
-.cons-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
+.cons-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: var(--gap-paneles); align-items: start; }
 @media (max-width: 1050px) { .cons-grid { grid-template-columns: 1fr; } }
 .col { display: flex; flex-direction: column; gap: 16px; }
 

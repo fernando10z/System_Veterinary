@@ -73,7 +73,7 @@ export class UsersController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: CambiarRolDto,
   ) {
-    return { ok: true, data: await this.users.cambiarRol(u, id, dto.rolId, dto.empresaId) };
+    return { ok: true, data: await this.users.cambiarRol(u, id, dto.rol_id, dto.empresa_id) };
   }
 
   @Post(":id/reset-password")
@@ -82,7 +82,7 @@ export class UsersController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: ResetPasswordAdminDto,
   ) {
-    return { ok: true, data: await this.users.resetPassword(u, id, dto.passwordTemp) };
+    return { ok: true, data: await this.users.resetPassword(u, id, dto.password_temp) };
   }
 
   @Delete(":id")

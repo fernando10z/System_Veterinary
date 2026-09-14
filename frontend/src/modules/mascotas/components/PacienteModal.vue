@@ -48,10 +48,26 @@
           </div>
           <div class="field">
             <label>Raza</label>
-            <select v-model="form.raza_id">
-              <option value="">Sin especificar / mestizo</option>
-              <option v-for="r in razasDeEspecie" :key="r.id" :value="r.id">{{ r.nombre }}</option>
-            </select>
+            <div class="raza-row">
+              <select v-model="form.raza_id" :disabled="!form.especie_id">
+                <option value="">Sin especificar</option>
+                <option v-for="r in razasDeEspecie" :key="r.id" :value="r.id">
+                  {{ r.nombre }}{{ r.propia ? " ·" : "" }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="btn"
+                :disabled="!form.especie_id"
+                title="Agregar una raza que no está en el catálogo"
+                @click="agregarRaza"
+              >
+                <Plus :size="13" />
+              </button>
+            </div>
+            <small class="muted">
+              ¿No está en la lista? Agrégala: queda en el catálogo de tu empresa.
+            </small>
           </div>
           <div class="field">
             <label>Sexo</label>
@@ -117,9 +133,11 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from "vue";
-import { AlertCircle, Search } from "lucide-vue-next";
+import { AlertCircle, Search, Plus } from "lucide-vue-next";
 import { mascotasApi } from "../api/mascotas.api.js";
 import { clientesApi } from "../../clientes/api/clientes.api.js";
+import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
+import { notify } from "../../../shared/composables/useNotify.js";
 import { iniciales } from "../../../shared/components/ui/format.js";
 
 const props = defineProps({
@@ -152,9 +170,34 @@ const form = reactive({
   senias_particulares: props.paciente?.senias_particulares ?? "",
 });
 
+/**
+ * El catálogo del padre puede quedar desfasado si acabamos de crear una raza,
+ * así que se mantiene una copia local que se refresca al agregar.
+ */
+const catalogo = ref(props.especies);
 const razasDeEspecie = computed(
-  () => props.especies.find((e) => e.id === form.especie_id)?.razas ?? [],
+  () => catalogo.value.find((e) => e.id === form.especie_id)?.razas ?? [],
 );
+
+/** Crea la raza en el catálogo de la empresa y la deja seleccionada. */
+async function agregarRaza() {
+  const nombre = await notify.prompt("Nueva raza", {
+    text: "Se agregará al catálogo de tu empresa para esta especie.",
+    placeholder: "Ej. Bulldog Inglés",
+  });
+  if (!nombre?.trim()) return;
+  try {
+    const r = await catalogosApi.guardarRaza({
+      especie_id: form.especie_id,
+      nombre: nombre.trim(),
+    });
+    const fresco = await catalogosApi.especies();
+    catalogo.value = fresco.data ?? [];
+    form.raza_id = r.data.id;
+  } catch (e) {
+    notify.error("No se pudo agregar la raza", e.message);
+  }
+}
 
 let timer = null;
 function buscarDebounced() {
@@ -198,8 +241,17 @@ async function guardar() {
   }
 }
 
-onMounted(() => {
-  // Al editar, la especie viene con las razas ya cargadas desde el catálogo.
+onMounted(async () => {
+  // Si el padre no pasó el catálogo (o llega vacío), se pide aquí: sin razas el
+  // formulario no se puede completar.
+  if (!catalogo.value.length) {
+    try {
+      const r = await catalogosApi.especies();
+      catalogo.value = r.data ?? [];
+    } catch {
+      // Sin catálogo se puede registrar igual: la raza es opcional.
+    }
+  }
 });
 </script>
 
@@ -222,6 +274,8 @@ onMounted(() => {
 }
 .res-item:last-child { border-bottom: none; }
 .res-item:hover { background: var(--bg-soft); }
+.raza-row { display: flex; gap: 6px; }
+.raza-row select { flex: 1; min-width: 0; }
 .req { color: var(--red); }
 .btn.mini { height: 26px; padding: 0 9px; font-size: 11.5px; }
 </style>
