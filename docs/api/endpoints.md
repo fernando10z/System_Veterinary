@@ -108,9 +108,20 @@ Requieren el token del portal.
 
 | Método | Ruta | Notas |
 |---|---|---|
-| POST | `/archivos` | Multipart; devuelve `storage_key`. |
-| GET | `/archivos/ticket-subida` | URL prefirmada para subir directo a MinIO. |
-| GET | `/archivos/ticket-descarga` | URL temporal de descarga. |
+| POST | `/archivos` | Multipart; devuelve `storage_key`. Exige `clinico:registrar`. Lista blanca de tipos: imágenes, PDF, DICOM, texto, Word y Excel. Máximo 50 MB. |
+| GET | `/archivos/ticket-subida` | URL prefirmada para subir directo a MinIO (archivos grandes). Mismos permisos. |
+| GET | `/archivos/ticket-descarga` | URL temporal de descarga. Exige `clinico:ver`. |
+
+MinIO no sabe de empresas ni de roles: la clave del objeto es lo único que hace
+falta para leerlo. Por eso **toda clave pasa antes por
+`app.fn_archivo_autorizar`**, que la descompone
+(`e_<uuid-empresa>/<area>/<aaaa>/<mm>/<epoch>_<nombre>`), comprueba que la
+empresa es la del usuario y que el área existe, y aplica el permiso. Una clave
+de otra clínica responde `404`, igual que cualquier otro registro ajeno.
+
+Áreas válidas: `clinico`, `documentos`, `resultados`, `consentimientos`, `logos`.
+La clave la arma siempre el backend con la empresa del token: el cliente elige el
+área y el nombre, nunca dónde se escribe.
 
 ## Códigos de error
 
@@ -120,5 +131,6 @@ Requieren el token del portal.
 | `BUSINESS_RULE` | 422 | Una regla de negocio lo impide |
 | `NOT_FOUND` | 404 | El registro no existe, o pertenece a otra empresa (no se revela cuál de las dos) |
 | `FORBIDDEN` | 403 | Sin permiso o sin acceso a la empresa |
+| `PASSWORD_CHANGE_REQUIRED` | 403 | Clave temporal sin cambiar. Solo responden `/auth/perfil`, `/auth/cambiar-password` y `/auth/logout` |
 | `UNAUTHORIZED` | 401 | Token ausente, inválido o expirado |
 | `CONFLICT` | 409 | Duplicado (documento, código, caja abierta) |

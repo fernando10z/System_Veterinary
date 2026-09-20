@@ -10,3 +10,4 @@ decisión y sus consecuencias.
 | [003](003-auth-separada-portal.md) | El portal del propietario usa una autenticación separada |
 | [004](004-normalizacion-en-la-base.md) | La normalización del dato vive en la base |
 | [005](005-facturacion-electronica.md) | La facturación electrónica entra por un adaptador |
+| [006](006-permisos-en-el-stored-procedure.md) | El permiso se comprueba dentro del stored procedure |

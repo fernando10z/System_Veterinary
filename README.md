@@ -98,6 +98,37 @@ nunca con `p_is_super_admin` a secas — eso ocultaría datos a gerencia.
 Por eso una mascota no puede quedar en una empresa distinta a la de su dueño, y el
 portal no puede pedir cita en una empresa que no es la suya.
 
+### El segundo eje: qué puede hacer cada uno dentro de su empresa
+
+El scope decide **de qué empresa** se ven los datos. El permiso decide **qué
+datos**, y es un eje independiente: recepción y el veterinario trabajan en la
+misma clínica y no tienen que ver lo mismo.
+
+**Regla, sin excepciones: todo SP —de lectura y de escritura— abre con
+`PERFORM internal.assert_permiso(p_user_id, '<modulo>:<accion>')`.** El
+controlador no comprueba permisos: no tiene con qué. El rol vive en la base y
+cambia sin reiniciar nada, así que la única comprobación que no se puede quedar
+obsoleta es la que se hace dentro del SP, contra `core.rol_permisos`, en la misma
+llamada que va a devolver el dato.
+
+Quedan fuera, y son las únicas: `fn_auth_perfil` (tu propia ficha),
+`fn_notificaciones_listar` (tus propios avisos), los catálogos de referencia
+—especies, razas, servicios, consultorios— que necesita cualquiera para que un
+desplegable se llene, y los SP del portal, que no reciben un usuario del staff
+sino un cliente y comprueban la propiedad de la mascota.
+
+Variantes del helper:
+
+| Helper | Cuándo |
+|---|---|
+| `internal.assert_permiso` | Aborta si falta el permiso. El caso normal. |
+| `internal.tiene_permiso` | Responde `boolean`. Cuando el permiso no decide si se entra, sino **cuánto se ve**: un veterinario con `rrhh:ver` consulta sus horas, no las de sus compañeros. |
+| `internal.usuario_objetivo` | Operaciones de autoservicio (fichar, pedir permiso). Actuar sobre el legajo de otro exige `rrhh:gestionar`. |
+
+Un usuario dado de baja conserva su token hasta 15 minutos. `assert_permiso`
+exige además `deleted_at IS NULL AND estado = 'activo'`, así que la baja tiene
+efecto en la siguiente llamada, no en el siguiente cuarto de hora.
+
 #### Lo único que comparten todas las empresas
 
 Identidad del sistema (`empresas`, `roles`, `permisos`, `users`) y taxonomía de
@@ -198,9 +229,26 @@ Están en los SPs, no en la UI, así que ningún cliente puede saltárselas:
 - Un usuario **no puede alcanzar datos de otra empresa** aunque conozca el id. Todo SP
   que recibe un id comprueba la pertenencia con `internal.es_de_empresa` y responde
   `NOT_FOUND` si no corresponde — no `FORBIDDEN`, para no revelar que el registro
-  existe en otra empresa. Verificado con `scripts/verificar-api.sh`: 115
-  comprobaciones, 0 fallos, incluidos los intentos de acceso cruzado y de
-  escalada de privilegios.
+  existe en otra empresa.
+- **El permiso se comprueba en el SP, no en el controlador** ([ADR-006](docs/decisions/006-permisos-en-el-stored-procedure.md)).
+  Recepción no lee el reporte ejecutivo ni las compras; el almacén no lee la
+  historia clínica; el veterinario no ve la caja. El menú ya lo ocultaba: ahora
+  también lo niega la API.
+- **Cambiar el IGV, las series o las credenciales del PSE** exige
+  `empresa:configurar`, y **marcar a mano un comprobante como aceptado por
+  SUNAT** exige `facturacion:sunat`. Emitir lo hace el mostrador; decidir qué se
+  declara, no.
+- **Un archivo clínico solo lo descarga su clínica.** MinIO no filtra por
+  empresa, así que toda clave pasa por `app.fn_archivo_autorizar` antes de
+  firmarse.
+- **La clave temporal hay que estrenarla**: hasta cambiarla, la sesión solo
+  puede consultar su ficha, cambiar la contraseña y salir.
+- **Fichar y pedir vacaciones es autoservicio**: hacerlo en nombre de otro exige
+  `rrhh:gestionar`.
+
+Verificado con `scripts/verificar-api.sh`: **164 comprobaciones, 0 fallos**,
+incluidos los intentos de acceso cruzado entre empresas, la escalada de
+privilegios, la matriz rol × endpoint y la descarga de archivos ajenos.
 
 ---
 
@@ -230,7 +278,7 @@ tiene `EXECUTE` sobre `app.*`, sin acceso directo a las tablas).
 ### Verificar que todo sigue en pie
 
 ```bash
-bash scripts/verificar-api.sh     # 134 comprobaciones: rutas, aislamiento, escalada, normalización
+bash scripts/verificar-api.sh     # 164 comprobaciones: rutas, aislamiento, roles, escalada, archivos
 bash scripts/flujo-clinico.sh     # flujo completo: cita → consulta → boleta → cobro → caja
 ```
 

@@ -82,6 +82,20 @@ cd backend && npm ci && npm run build && pm2 reload veterp-api
 cd frontend && npm ci && npm run build && sudo cp -r dist/* /var/www/veterp/
 ```
 
+## Proxy inverso y límite de peticiones
+
+`TRUST_PROXY` declara cuántos proxies hay delante del backend. Detrás del nginx
+de este despliegue es **1**; sin proxy, se deja vacío.
+
+No es cosmético: con `trustProxy: true` —que era lo que había— Fastify se creía
+cualquier `X-Forwarded-For`, incluida la que escribiera el cliente. El límite de
+10 intentos de login por minuto se saltaba rotando esa cabecera, y la IP que
+quedaba en la bitácora era la que el atacante quisiera. Ponerlo a un número
+mayor que el de proxies reales reabre exactamente el mismo agujero.
+
+El contador del límite vive en Redis (`ThrottlerRedisStorage`), no en la memoria
+del proceso: PM2 arranca en cluster y cada núcleo llevaba su propia cuenta.
+
 ## Backups
 
 `pg_dump -Fc` con timestamp. En producción conviene un cron diario y copia fuera del

@@ -189,10 +189,16 @@ c=$(req "$T_E2"   /users POST "$(printf "$BODY_EVIL" 1 1 | sed "s/ROLSUPER/$ROL_
 c=$(req "$T_VET2" /users POST "$(printf "$BODY_EVIL" 2 2 | sed "s/ROLSUPER/$ROL_SUPER/")"); check "veterinario e2 crea super_admin" 403 "$c"
 
 # Sufijo distinto en cada corrida: la prueba crea registros reales y no debe
-# chocar con los de la corrida anterior.
-N=$(( (RANDOM % 90) + 10 ))
-echo "═══ 5. Normalización (DNI 556677$N) ═══"
-c=$(req "$T_E2" /clientes POST '{"tipo_documento":"DNI","numero_documento":" 55-667.7'"$N"' ","nombres":"  josé   maría ","apellido_paterno":"DE LA cruz","apellido_materno":"soto","telefono":"(01) 445-5667","correo":"  Jose.Maria@GMAIL.COM  "}')
+# chocar con los de la corrida anterior. El DNI tiene ocho dígitos, así que el
+# sufijo solo da 90 combinaciones: a la décima corrida el choque es probable y
+# el fallo no dice nada sobre el sistema. Se buscan sufijos libres.
+N=""
+for _ in $(seq 1 25); do
+  CAND=$(( (RANDOM % 90) + 10 ))
+  c=$(req "$T_E2" /clientes POST '{"tipo_documento":"DNI","numero_documento":" 55-667.7'"$CAND"' ","nombres":"  josé   maría ","apellido_paterno":"DE LA cruz","apellido_materno":"soto","telefono":"(01) 445-5667","correo":"  Jose.Maria@GMAIL.COM  "}')
+  [[ "$c" != 409 ]] && { N=$CAND; break; }
+done
+echo "═══ 5. Normalización (DNI 556677${N:-??}) ═══"
 check "crea cliente con datos sucios" 201 "$c"
 NUEVO=$(jid)
 if [[ -n "$NUEVO" ]]; then
@@ -212,16 +218,125 @@ check "documento duplicado tras normalizar" 409 "$c"
 
 echo "═══ 6. Razas propias por empresa ═══"
 get "$T_E2" /catalogos/especies >/dev/null; ESP=$(jid)
-c=$(req "$T_E2" /catalogos/razas POST "{\"especie_id\":\"$ESP\",\"nombre\":\"  raza   SOLO de e2 $N \"}")
+RAZA="raza SOLO de e2 $N-$(date +%H%M%S)"
+c=$(req "$T_E2" /catalogos/razas POST "{\"especie_id\":\"$ESP\",\"nombre\":\"  $RAZA \"}")
 check "e2 crea su propia raza" 201 "$c"
 get "$T_E1" /catalogos/especies >/dev/null
-VE=$(python3 <<'PYX'
-import json
+VE=$(RAZA="$RAZA" python3 <<'PYX'
+import json, os
 d = json.load(open("/tmp/vbody"))["data"]
-print("SI" if any(r["nombre"].lower().startswith("raza solo de e2") for e in d for r in e.get("razas", [])) else "NO")
+objetivo = os.environ["RAZA"].lower()
+print("SI" if any(r["nombre"].lower() == objetivo for e in d for r in e.get("razas", [])) else "NO")
 PYX
 )
 check "e1 NO ve la raza de e2" NO "$VE"
+
+echo "═══ 7. Matriz de roles: cada quien ve lo suyo ═══"
+# El aislamiento entre empresas ya estaba probado; esto prueba el de adentro.
+# Durante mucho tiempo el menú ocultaba las pantallas y la API las servía igual:
+# recepción podía leer los márgenes y el almacenero, la historia clínica.
+T_RECEP=$(login recepcion@vetpatitas.pe)
+T_ALM=$(login almacen@vetpatitas.pe)
+T_VET1=$(login jperez@vetpatitas.pe)
+T_GER=$(login gerencia@vetpatitas.pe)
+
+# rol_token  descripción  método  ruta  esperado  [cuerpo]
+matriz() {
+  local tok="$1" desc="$2" met="$3" ruta="$4" esp="$5" cuerpo="${6:-}"
+  local c
+  if [[ "$met" == GET ]]; then c=$(get "$tok" "$ruta"); else c=$(req "$tok" "$ruta" "$met" "${cuerpo:-{\}}"); fi
+  check "$desc" "$esp" "$c"
+}
+
+# --- Recepción: mostrador. Ni márgenes, ni legajos, ni compras, ni bitácora ---
+matriz "$T_RECEP" "recepción NO ve el reporte ejecutivo"   GET /reportes/ejecutivo 403
+matriz "$T_RECEP" "recepción NO ve reportes de ventas"     GET /reportes/ventas    403
+matriz "$T_RECEP" "recepción NO ve el equipo"              GET /rrhh/equipo        403
+matriz "$T_RECEP" "recepción NO ve las compras"            GET /compras/ordenes    403
+matriz "$T_RECEP" "recepción NO ve la bitácora"            GET /auditoria          403
+matriz "$T_RECEP" "recepción NO lista usuarios"            GET /users              403
+matriz "$T_RECEP" "recepción SÍ ve la agenda"              GET /citas              200
+matriz "$T_RECEP" "recepción SÍ ve la facturación"         GET /facturacion        200
+
+# --- Veterinario: clínica y agenda; nada de dinero ---------------------------
+matriz "$T_VET1" "veterinario NO ve los pagos"             GET /pagos              403
+matriz "$T_VET1" "veterinario NO ve la caja"               GET /caja               403
+matriz "$T_VET1" "veterinario NO ve el reporte ejecutivo"  GET /reportes/ejecutivo 403
+matriz "$T_VET1" "veterinario SÍ ve las consultas"         GET /clinico/consultas  200
+
+# --- Almacén: inventario y compras; la historia clínica no es suya -----------
+matriz "$T_ALM" "almacén NO ve la historia clínica"        GET /clinico/consultas  403
+matriz "$T_ALM" "almacén NO lista pacientes"               GET /mascotas           403
+matriz "$T_ALM" "almacén SÍ ve el inventario"              GET /inventario/productos 200
+matriz "$T_ALM" "almacén SÍ ve las compras"                GET /compras/ordenes    200
+
+# --- Gerencia: lo ve todo, no toca nada --------------------------------------
+matriz "$T_GER" "gerencia SÍ ve el reporte ejecutivo"      GET /reportes/ejecutivo 200
+matriz "$T_GER" "gerencia NO crea clientes"                POST /clientes          403 \
+  '{"tipo_documento":"DNI","numero_documento":"70707070","nombres":"X","apellido_paterno":"Y"}'
+
+# --- Configuración de la empresa y estado ante SUNAT -------------------------
+get "$T_E1" /empresas >/dev/null; EMP1=$(jid)
+matriz "$T_RECEP" "recepción NO cambia el IGV ni las series" PATCH "/empresas/$EMP1" 403 \
+  '{"igv_tasa":0.05,"serie_factura_default":"F999"}'
+matriz "$T_VET1"  "veterinario NO cambia los datos de la empresa" PATCH "/empresas/$EMP1" 403 \
+  '{"nombre_comercial":"Otro nombre"}'
+get "$T_E1" /facturacion >/dev/null; CMP1=$(jid)
+matriz "$T_RECEP" "recepción NO marca un comprobante como aceptado por SUNAT" \
+  PATCH "/facturacion/$CMP1/sunat" 403 '{"estado":"aceptado_sunat","sunat_codigo":"0"}'
+
+# --- Escribir en la historia clínica exige ser clínico -----------------------
+get "$T_E1" /mascotas >/dev/null; MASC1=$(jid)
+matriz "$T_ALM" "almacén NO escribe notas médicas" POST /clinico/notas 403 \
+  "{\"mascota_id\":\"$MASC1\",\"nota\":\"no deberia entrar\"}"
+
+# --- RRHH: fichar y pedir permisos es autoservicio ---------------------------
+OTRO=$(python3 -c "import json;print(json.load(open('/tmp/vbody')).get('x',''))" 2>/dev/null)
+get "$T_E1" /rrhh/equipo >/dev/null
+OTRO_USER=$(python3 <<'PYX'
+import json
+d = json.load(open("/tmp/vbody")).get("data") or []
+print(next((x["user_id"] for x in d if x.get("user_id")), ""))
+PYX
+)
+if [[ -n "$OTRO_USER" ]]; then
+  matriz "$T_VET1" "veterinario NO ficha por un compañero" POST /rrhh/asistencia/marcar 403 \
+    "{\"userId\":\"$OTRO_USER\"}"
+  matriz "$T_VET1" "veterinario NO pide vacaciones a nombre de otro" POST /rrhh/permisos 403 \
+    "{\"user_id\":\"$OTRO_USER\",\"tipo\":\"vacaciones\",\"fecha_inicio\":\"2027-01-05\",\"fecha_fin\":\"2027-01-06\"}"
+fi
+
+echo "═══ 8. Archivos clínicos: el almacén no sabe de empresas ═══"
+# MinIO no filtra por empresa: la clave del objeto es tan sensible como la fila
+# que la guarda, y el ticket de descarga la firmaba sin mirar de quién era.
+printf 'RADIOGRAFIA DE PRUEBA' > /tmp/vet-rx.png
+SUBIDA=$(curl -s -X POST "$API/archivos" -H "Authorization: Bearer $T_VET1" \
+         -F "file=@/tmp/vet-rx.png;type=image/png")
+KEY=$(python3 -c 'import sys,json;print(json.load(sys.stdin).get("data",{}).get("storage_key",""))' <<<"$SUBIDA")
+if [[ -n "$KEY" ]]; then ok=$((ok+1)); else fail=$((fail+1)); FALLOS+=("el veterinario no pudo subir un archivo :: $SUBIDA"); fi
+
+c=$(curl -s -o /tmp/vbody -w '%{http_code}' -G "$API/archivos/ticket-descarga" \
+    --data-urlencode "key=$KEY" -H "Authorization: Bearer $T_VET2")
+check "la otra empresa NO descarga el archivo" 404 "$c"
+
+c=$(curl -s -o /tmp/vbody -w '%{http_code}' -G "$API/archivos/ticket-descarga" \
+    --data-urlencode "key=$KEY" -H "Authorization: Bearer $T_VET1")
+check "el veterinario que lo subió SÍ lo descarga" 200 "$c"
+
+c=$(curl -s -o /tmp/vbody -w '%{http_code}' -G "$API/archivos/ticket-descarga" \
+    --data-urlencode "key=e_00000000-0000-0000-0000-000000000000/../clinico/x" \
+    -H "Authorization: Bearer $T_VET1")
+check "ruta relativa rechazada" 422 "$c"
+
+c=$(curl -s -o /tmp/vbody -w '%{http_code}' -G "$API/archivos/ticket-subida" \
+    --data-urlencode "nombre=x.pdf" --data-urlencode "area=nomina" \
+    -H "Authorization: Bearer $T_VET1")
+check "área de archivo inventada rechazada" 422 "$c"
+
+printf '<script>alert(1)</script>' > /tmp/vet-x.html
+c=$(curl -s -o /tmp/vbody -w '%{http_code}' -X POST "$API/archivos" \
+    -H "Authorization: Bearer $T_VET1" -F "file=@/tmp/vet-x.html;type=text/html")
+check "subida de HTML rechazada" 400 "$c"
 
 echo
 echo "═══════════════════════════════════════"
