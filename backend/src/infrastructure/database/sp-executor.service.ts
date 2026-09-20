@@ -5,9 +5,10 @@ import {
   Injectable,
   Logger,
 } from "@nestjs/common";
-import { Pool } from "pg";
+import { Pool, PoolClient } from "pg";
 import { PG_POOL } from "./database.constants";
 import { SpContext, SpResult } from "../../common/types/sp-result.type";
+import { contextoActual } from "../../common/context/request-context";
 
 const ERROR_STATUS: Record<string, HttpStatus> = {
   NOT_FOUND: HttpStatus.NOT_FOUND,
@@ -46,58 +47,110 @@ const MENSAJE_GENERICO: Record<string, string> = {
   "23514": "Los datos no cumplen una restricción del sistema",
 };
 
+/**
+ * Fija la IP y el agente de la petición como ajustes de sesión de Postgres.
+ * `internal.registrar_auditoria` los lee con `current_setting(..., true)`.
+ *
+ * Se fijan SIEMPRE, aunque vengan vacíos: la conexión sale de un pool y se
+ * reutiliza, así que no reescribirlos dejaría a esta petición firmando la
+ * bitácora con la IP de la anterior.
+ */
+const SQL_CONTEXTO =
+  "SELECT set_config('app.client_ip', $1, false), set_config('app.user_agent', $2, false)";
+
 @Injectable()
 export class SpExecutorService {
   private readonly logger = new Logger(SpExecutorService.name);
 
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
-  async call<T = unknown>(fnName: string, params: unknown[]): Promise<T> {
+  /**
+   * Ejecuta el SP y devuelve su sobre `{ok, data, error, meta}` sin interpretar.
+   * Traduce los errores que Postgres lanza —los que el SP no atrapó— al mismo
+   * formato, para que arriba haya un solo camino de error.
+   */
+  private async ejecutar<T>(fnName: string, params: unknown[]): Promise<SpResult<T>> {
     const placeholders = params.map((_, i) => `$${i + 1}`).join(", ");
     const sql = `SELECT ${fnName}(${placeholders}) AS result`;
-    let row;
+    const ctx = contextoActual();
+
+    let client: PoolClient | undefined;
     try {
-      const r = await this.pool.query<{ result: SpResult<T> }>(sql, params as any[]);
-      row = r.rows[0]?.result;
+      client = await this.pool.connect();
+      await client.query(SQL_CONTEXTO, [
+        ctx?.ip ?? "",
+        (ctx?.userAgent ?? "").slice(0, 300),
+      ]);
+      const r = await client.query<{ result: SpResult<T> }>(sql, params as any[]);
+      const row = r.rows[0]?.result;
+      if (!row || typeof row !== "object") {
+        throw new HttpException(
+          { code: "DATABASE_ERROR", message: `Respuesta inválida de ${fnName}` },
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+      return row;
     } catch (err: any) {
+      if (err instanceof HttpException) throw err;
+
+      // Un SP sin bloque EXCEPTION deja escapar la excepción de Postgres. El
+      // SQLSTATE sigue siendo una respuesta del dominio (permiso, unicidad,
+      // regla): se convierte al mismo sobre en vez de degradar todo a un 500.
+      if (typeof err?.code === "string" && ERROR_STATUS[err.code] !== undefined) {
+        return {
+          ok: false,
+          error: { code: err.code, message: err.message ?? "Operación rechazada" },
+        };
+      }
+
+      // Lo que queda es un fallo de verdad. El mensaje de Postgres nombra
+      // tablas, columnas y a veces el dato que falló: se queda en el log.
       this.logger.error(`Error en ${fnName}: ${err?.message}`, err?.stack);
       throw new HttpException(
-        { code: "DATABASE_ERROR", message: err?.message ?? "Error de base de datos" },
+        { code: "DATABASE_ERROR", message: "Error interno al procesar la operación" },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    } finally {
+      client?.release();
     }
-    if (!row || typeof row !== "object") {
-      throw new HttpException(
-        { code: "DATABASE_ERROR", message: `Respuesta inválida de ${fnName}` },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+  }
+
+  /** Convierte un sobre con `ok:false` en la excepción HTTP que le corresponde. */
+  private lanzarSiFalla(fnName: string, row: SpResult<unknown>): void {
+    if (row.ok) return;
+    const bruto = row.error?.code ?? "BUSINESS_RULE";
+    const status = ERROR_STATUS[bruto] ?? HttpStatus.UNPROCESSABLE_ENTITY;
+    // Un SQLSTATE crudo no le dice nada al usuario y describe de dónde salió la
+    // comprobación: se traduce a un código del dominio y, si el mensaje viene
+    // de Postgres, se sustituye por uno entendible.
+    const code = CODIGO_SEMANTICO[bruto] ?? bruto;
+    const message =
+      MENSAJE_GENERICO[bruto] ?? row.error?.message ?? "Operación rechazada";
+    if (CODIGO_SEMANTICO[bruto]) {
+      this.logger.warn(`${fnName} → SQLSTATE ${bruto}: ${row.error?.message}`);
     }
-    if (!row.ok) {
-      const bruto = row.error?.code ?? "BUSINESS_RULE";
-      const status = ERROR_STATUS[bruto] ?? HttpStatus.UNPROCESSABLE_ENTITY;
-      // Un SQLSTATE crudo no le dice nada al usuario y describe de dónde salió la
-      // comprobación: se traduce a un código del dominio y, si el mensaje viene
-      // de Postgres, se sustituye por uno entendible.
-      const code = CODIGO_SEMANTICO[bruto] ?? bruto;
-      const message =
-        MENSAJE_GENERICO[bruto] ?? row.error?.message ?? "Operación rechazada";
-      if (CODIGO_SEMANTICO[bruto]) {
-        this.logger.warn(`${fnName} → SQLSTATE ${bruto}: ${row.error?.message}`);
-      }
-      throw new HttpException({ code, message, detail: row.error?.detail }, status);
-    }
+    throw new HttpException({ code, message, detail: row.error?.detail }, status);
+  }
+
+  async call<T = unknown>(fnName: string, params: unknown[]): Promise<T> {
+    const row = await this.ejecutar<T>(fnName, params);
+    this.lanzarSiFalla(fnName, row);
     return (row.data as T) ?? (row as unknown as T);
   }
 
   /**
-   * Variante que devuelve {ok, data, meta} sin desempacar.
-   * Útil cuando el endpoint quiere propagar `meta` (paginación) al cliente.
+   * Variante que devuelve {data, meta} sin desempacar, para propagar la
+   * paginación al cliente.
+   *
+   * Rechaza igual que `call`. Antes devolvía el sobre tal cual y quien llamaba
+   * hacía `r?.data ?? []`: un 403 del SP se convertía en un 200 con la lista
+   * vacía, así que el usuario sin permiso veía "no hay registros" en vez de un
+   * "no tienes acceso" —y el ERP parecía funcionar—.
    */
   async callRaw<T = unknown>(fnName: string, params: unknown[]): Promise<SpResult<T>> {
-    const placeholders = params.map((_, i) => `$${i + 1}`).join(", ");
-    const sql = `SELECT ${fnName}(${placeholders}) AS result`;
-    const r = await this.pool.query<{ result: SpResult<T> }>(sql, params as any[]);
-    return r.rows[0]?.result;
+    const row = await this.ejecutar<T>(fnName, params);
+    this.lanzarSiFalla(fnName, row);
+    return row;
   }
 
   /** Helper: invoca un SP que sigue la convención (user_id, empresa_id, is_super_admin, ...args). */
