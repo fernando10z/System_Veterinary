@@ -27,7 +27,8 @@ DECLARE
     'consultorios','clausulas','citas','historia_clinica','consultas','vacunas','tratamientos',
     'cirugias','hospitalizaciones','notas_medicas','ordenes_servicio','almacenes','productos',
     'lotes','stock','proveedores','proveedor_contactos','ordenes_compra','comprobantes',
-    'cajas','contratos_personal','disponibilidad','asistencia','permisos_laborales'
+    'cajas','contratos_personal','disponibilidad','asistencia','permisos_laborales',
+    'plantillas_mensaje'
   ];
 BEGIN
   FOREACH t IN ARRAY tablas LOOP

@@ -143,6 +143,11 @@
             Por contactar
             <span class="head-meta">{{ recordatorios.length }}</span>
           </h2>
+          <div class="module-panel-head-actions">
+            <button class="btn mini" :disabled="generando" @click="generarAvisosCitas">
+              {{ generando ? "Armando…" : "Avisar citas de mañana" }}
+            </button>
+          </div>
         </header>
 
         <div v-if="!recordatorios.length" class="module-panel-body module-empty">
@@ -167,7 +172,28 @@
               <span :class="['estado-pill', r.dias_restantes < 0 ? 'danger' : 'warn']">
                 {{ r.dias_restantes < 0 ? "vencido" : fmtRelativo(r.fecha_objetivo) }}
               </span>
-              <button class="btn mini" @click="completar(r)">Hecho</button>
+              <div class="acciones-rec">
+                <!-- El mensaje ya viene redactado desde la base: acá sólo se
+                     abre la conversación. Sin celular no hay WhatsApp al que
+                     escribir, así que se ofrece llamar. -->
+                <button
+                  v-if="r.whatsapp"
+                  class="btn mini primary"
+                  :title="r.mensaje_sugerido"
+                  @click="contactarWhatsapp(r)"
+                >
+                  <MessageCircle :size="12" /> WhatsApp
+                </button>
+                <a
+                  v-else-if="r.cliente_telefono"
+                  class="btn mini"
+                  :href="`tel:${r.cliente_telefono}`"
+                  @click="marcarContactado(r, 'llamada')"
+                >
+                  <Phone :size="12" /> Llamar
+                </a>
+                <button class="btn mini" @click="completar(r)">Hecho</button>
+              </div>
             </div>
           </div>
         </div>
@@ -258,7 +284,7 @@ import { ref, computed, onMounted } from "vue";
 import {
   CalendarClock, CalendarCheck, CalendarRange, Receipt, Wallet, TrendingUp,
   RefreshCw, Loader2, BellRing, CheckCircle2, Stethoscope, BarChart3,
-  ChevronRight, PackageX, CalendarX, Syringe, AlarmClock, Scissors,
+  ChevronRight, PackageX, CalendarX, Syringe, AlarmClock, Scissors, MessageCircle, Phone,
 } from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import { dashboardApi } from "../api/dashboard.api.js";
@@ -271,6 +297,7 @@ const { user } = useAuth();
 const d = ref({});
 const citasHoy = ref([]);
 const recordatorios = ref([]);
+const generando = ref(false);
 const cargando = ref(false);
 const periodo = ref("mes");
 
@@ -358,9 +385,55 @@ async function cargar() {
   }
 }
 
+/**
+ * El panel se carga eager, así que sweetalert2 no puede entrar en su bundle:
+ * son 85 kB en el arranque de todos los días por un aviso que casi nunca se
+ * muestra. Se importa recién cuando hace falta avisar algo.
+ */
+async function avisar(tipo, titulo, detalle) {
+  const { notify } = await import("../../../shared/composables/useNotify.js");
+  notify[tipo](titulo, detalle);
+}
+
 async function completar(r) {
   await dashboardApi.completarRecordatorio(r.id);
   recordatorios.value = recordatorios.value.filter((x) => x.id !== r.id);
+}
+
+/** Deja el contacto registrado sin cerrar el recordatorio: enviar no es que
+ *  el propietario haya respondido. */
+async function marcarContactado(r, canal) {
+  try {
+    await dashboardApi.contactarRecordatorio(r.id, { canal, mensaje: r.mensaje_sugerido });
+    r.enviado_at = new Date().toISOString();
+  } catch (e) {
+    await avisar("error", "No se pudo registrar el contacto", e.message);
+  }
+}
+
+function contactarWhatsapp(r) {
+  window.open(
+    `https://wa.me/${r.whatsapp}?text=${encodeURIComponent(r.mensaje_sugerido ?? "")}`,
+    "_blank",
+    "noopener",
+  );
+  marcarContactado(r, "whatsapp");
+}
+
+async function generarAvisosCitas() {
+  generando.value = true;
+  try {
+    const { data } = await dashboardApi.generarRecordatoriosCitas(1);
+    await avisar(
+      "success",
+      data.generados ? `${data.generados} aviso(s) listos para enviar` : "No hay citas por avisar",
+    );
+    await cargar();
+  } catch (e) {
+    await avisar("error", "No se pudieron armar los avisos", e.message);
+  } finally {
+    generando.value = false;
+  }
 }
 
 onMounted(cargar);
@@ -424,4 +497,5 @@ onMounted(cargar);
 .especie-row .n { font-size: 12px; color: var(--ink-3); text-align: right; }
 
 .btn.mini { height: 24px; padding: 0 8px; font-size: 11px; }
+.acciones-rec { display: flex; gap: 5px; justify-content: flex-end; flex-wrap: wrap; }
 </style>

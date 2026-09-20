@@ -1204,6 +1204,26 @@ CREATE INDEX IF NOT EXISTS ix_comunicaciones_seguim  ON core.comunicaciones (emp
   WHERE requiere_seguimiento = true;
 
 -- Recordatorios automáticos (refuerzo de vacuna, control post-operatorio…)
+-- -----------------------------------------------------------------------------
+-- core.plantillas_mensaje
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.plantillas_mensaje (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id  UUID NOT NULL REFERENCES core.empresas(id) ON DELETE CASCADE,
+  tipo        VARCHAR(40) NOT NULL,   -- vacuna | desparasitacion | control | cita | cumpleanios | deuda
+  canal       core.canal_notificacion NOT NULL DEFAULT 'whatsapp',
+  nombre      VARCHAR(120) NOT NULL,
+  texto       TEXT NOT NULL,
+  estado      core.estado_generico NOT NULL DEFAULT 'activo',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_plantillas_mensaje UNIQUE (empresa_id, tipo, canal)
+);
+CREATE INDEX IF NOT EXISTS ix_plantillas_mensaje ON core.plantillas_mensaje (empresa_id, tipo);
+
+COMMENT ON TABLE core.plantillas_mensaje IS
+  'Texto con el que cada clínica contacta a sus propietarios. Variables: {{propietario}}, {{paciente}}, {{clinica}}, {{fecha}}, {{titulo}}, {{telefono_clinica}}.';
+
 CREATE TABLE IF NOT EXISTS core.recordatorios (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id   UUID NOT NULL REFERENCES core.empresas(id) ON DELETE CASCADE,

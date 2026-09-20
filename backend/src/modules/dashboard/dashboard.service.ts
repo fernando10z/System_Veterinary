@@ -18,4 +18,14 @@ export class DashboardService {
   recordatorioCompletar(u: JwtPayload, id: string) {
     return this.repo.recordatorioCompletar(this.ctx(u), id);
   }
+  recordatorioContactar(u: JwtPayload, id: string, p: Record<string, unknown>) {
+    return this.repo.recordatorioContactar(this.ctx(u), id, p);
+  }
+  generarRecordatoriosCitas(u: JwtPayload, dias: number) {
+    return this.repo.generarRecordatoriosCitas(this.ctx(u), dias);
+  }
+  plantillasListar(u: JwtPayload) { return this.repo.plantillasListar(this.ctx(u)); }
+  plantillaGuardar(u: JwtPayload, p: Record<string, unknown>) {
+    return this.repo.plantillaGuardar(this.ctx(u), p);
+  }
 }
