@@ -16,6 +16,9 @@ export class FacturacionService {
   }
   obtener(u: JwtPayload, id: string) { return this.repo.obtener(this.ctx(u), id); }
   emitir(u: JwtPayload, d: object) { return this.repo.emitir(this.ctx(u), { ...d }); }
+  emitirNotaCredito(u: JwtPayload, d: object) {
+    return this.repo.emitirNotaCredito(this.ctx(u), { ...d });
+  }
   anular(u: JwtPayload, id: string, motivo: string) { return this.repo.anular(this.ctx(u), id, motivo); }
   actualizarSunat(u: JwtPayload, id: string, d: object) {
     return this.repo.actualizarSunat(this.ctx(u), id, { ...d });

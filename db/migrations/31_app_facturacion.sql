@@ -146,7 +146,17 @@ BEGIN
                      'referencia', pg.referencia) ORDER BY pg.fecha_pago), '[]'::jsonb)
               FROM core.pago_aplicaciones pa
               JOIN core.pagos pg ON pg.id = pa.pago_id
-             WHERE pa.comprobante_id = c.id AND pg.anulado_at IS NULL) AS pagos
+             WHERE pa.comprobante_id = c.id AND pg.anulado_at IS NULL) AS pagos,
+           -- El documento que esta nota corrige, y las notas que corrigen a este.
+           (SELECT jsonb_build_object('id', r.id, 'numero_completo', r.numero_completo,
+                                      'tipo', r.tipo, 'total', r.total)
+              FROM core.comprobantes r WHERE r.id = c.documento_ref_id) AS documento_ref,
+           (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                     'id', nc.id, 'numero_completo', nc.numero_completo,
+                     'total', nc.total, 'motivo', nc.motivo_nota,
+                     'fecha_emision', nc.fecha_emision) ORDER BY nc.fecha_emision), '[]'::jsonb)
+              FROM core.comprobantes nc
+             WHERE nc.documento_ref_id = c.id AND nc.deleted_at IS NULL) AS notas_credito
     FROM core.comprobantes c
     JOIN core.clientes cl ON cl.id = c.cliente_id
     JOIN core.empresas e  ON e.id = c.empresa_id
@@ -296,14 +306,22 @@ BEGIN
 
     INSERT INTO core.comprobante_items (
       comprobante_id, tipo_item, servicio_id, producto_id, orden_servicio_id,
-      codigo, descripcion, cantidad, precio_unitario, descuento,
+      insumo_id, codigo, descripcion, cantidad, precio_unitario, descuento,
       afecto_igv, subtotal, igv, total, orden
     ) VALUES (
       v_id,
-      COALESCE((v_item->>'tipo_item')::core.tipo_item_comprobante, 'servicio'),
+      -- El tipo se deduce del origen antes que de lo que mande el cliente: un
+      -- ítem con producto es producto aunque el payload diga otra cosa.
+      COALESCE(
+        NULLIF(v_item->>'tipo_item','')::core.tipo_item_comprobante,
+        CASE WHEN NULLIF(v_item->>'producto_id','') IS NOT NULL
+                  OR NULLIF(v_item->>'insumo_id','') IS NOT NULL THEN 'producto'
+             WHEN NULLIF(v_item->>'servicio_id','') IS NOT NULL THEN 'servicio'
+             ELSE 'otro' END::core.tipo_item_comprobante),
       NULLIF(v_item->>'servicio_id','')::uuid,
       NULLIF(v_item->>'producto_id','')::uuid,
       NULLIF(v_item->>'orden_servicio_id','')::uuid,
+      NULLIF(v_item->>'insumo_id','')::uuid,
       v_item->>'codigo', v_item->>'descripcion',
       (v_item->>'cantidad')::numeric, (v_item->>'precio_unitario')::numeric,
       COALESCE((v_item->>'descuento')::numeric, 0),
@@ -322,9 +340,10 @@ BEGIN
        WHERE id = (v_item->>'insumo_id')::uuid;
     END IF;
 
-    -- Venta de mostrador (producto sin insumo previo): descuenta stock
-    IF COALESCE(v_item->>'tipo_item','servicio') = 'producto'
-       AND NULLIF(v_item->>'insumo_id','') IS NULL
+    -- Venta de mostrador: el producto sale del almacén aquí. Si viene de un
+    -- insumo, el stock ya se descontó en la atención y volver a moverlo dejaría
+    -- el kardex con el doble de salidas.
+    IF NULLIF(v_item->>'insumo_id','') IS NULL
        AND NULLIF(v_item->>'producto_id','') IS NOT NULL THEN
       PERFORM internal.mover_stock(
         v_emp, (v_item->>'producto_id')::uuid, 'salida', 'venta',
@@ -369,7 +388,8 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_c RECORD;
+  v_c    RECORD;
+  v_item RECORD;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'facturacion:anular');
 
@@ -398,19 +418,53 @@ BEGIN
         'El comprobante fue aceptado por SUNAT: corresponde emitir una nota de crédito'));
   END IF;
 
+  -- Si ya se corrigió con una nota de crédito, anular encima devolvería el
+  -- stock y el saldo por segunda vez. El documento ya tiene su corrección.
+  IF EXISTS (SELECT 1 FROM core.comprobantes nc
+              WHERE nc.documento_ref_id = p_id AND nc.anulado_at IS NULL
+                AND nc.deleted_at IS NULL) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('BUSINESS_RULE',
+        'El comprobante ya tiene una nota de crédito: esa es su corrección'));
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM core.pago_aplicaciones pa
+              JOIN core.pagos pg ON pg.id = pa.pago_id AND pg.anulado_at IS NULL
+             WHERE pa.comprobante_id = p_id) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('BUSINESS_RULE',
+        'El comprobante tiene cobros aplicados: anula primero los pagos o emite una nota de crédito'));
+  END IF;
+
   UPDATE core.comprobantes
      SET estado = 'anulado', anulado_at = now(),
          motivo_nota = p_motivo, saldo_pendiente = 0,
          estado_pago = 'anulado', updated_by = p_user_id
    WHERE id = p_id;
 
-  -- Devolver los ítems al pool de pendientes
+  -- Devolver los ítems al pool de pendientes: lo que se anuló sigue prestado y
+  -- sigue debiéndose.
   UPDATE core.ordenes_servicio SET facturado = false, comprobante_id = NULL
    WHERE comprobante_id = p_id;
 
   UPDATE core.insumos_utilizados SET facturado = false
-   WHERE id IN (SELECT i.orden_servicio_id FROM core.comprobante_items i
-                 WHERE i.comprobante_id = p_id AND i.orden_servicio_id IS NOT NULL);
+   WHERE id IN (SELECT i.insumo_id FROM core.comprobante_items i
+                 WHERE i.comprobante_id = p_id AND i.insumo_id IS NOT NULL);
+
+  -- La venta de mostrador salió del almacén al emitir: al anular, vuelve. Los
+  -- insumos no se reponen porque el producto ya se usó en el paciente.
+  FOR v_item IN
+    SELECT ci.producto_id, ci.cantidad
+      FROM core.comprobante_items ci
+     WHERE ci.comprobante_id = p_id
+       AND ci.producto_id IS NOT NULL AND ci.insumo_id IS NULL
+  LOOP
+    PERFORM internal.mover_stock(
+      v_c.empresa_id, v_item.producto_id, 'entrada', 'devolucion',
+      v_item.cantidad, p_user_id, NULL,
+      jsonb_build_object('cliente_id', v_c.cliente_id, 'comprobante_id', p_id,
+                         'observaciones', 'Anulación de ' || v_c.numero_completo));
+  END LOOP;
 
   PERFORM internal.registrar_auditoria(
     p_user_id, v_c.empresa_id, 'anular', 'comprobantes', p_id, NULL,
@@ -459,6 +513,183 @@ BEGIN
   END IF;
 
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', p_id));
+
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- app.sp_nota_credito_emitir
+--
+-- El camino correcto cuando el comprobante ya llegó a SUNAT. Anularlo no es una
+-- opción: el documento existe para la administración tributaria, y lo que
+-- corrige el error es otro documento que lo referencia.
+--
+-- Soporta la nota total (todos los ítems) y la parcial (los ítems indicados,
+-- típicamente una devolución de producto o un servicio cobrado de más).
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.sp_nota_credito_emitir(
+  p_user_id        UUID,
+  p_empresa_id     UUID,
+  p_is_super_admin BOOLEAN,
+  p_payload        JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, app, internal, public
+AS $$
+DECLARE
+  v_id      UUID;
+  v_emp     UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_ref     RECORD;
+  v_serie   TEXT;
+  v_numero  INT;
+  v_motivo  TEXT := NULLIF(trim(p_payload->>'motivo'), '');
+  v_items   JSONB := COALESCE(p_payload->'items', '[]'::jsonb);
+  v_item    JSONB;
+  v_orden   INT := 0;
+  v_ci      RECORD;
+  v_cant    NUMERIC(12,2);
+  v_total   NUMERIC(14,2) := 0;
+  v_acred   NUMERIC(12,2);
+  v_repone  BOOLEAN := COALESCE((p_payload->>'repone_stock')::boolean, true);
+BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
+  PERFORM internal.validar_payload(p_payload, ARRAY['comprobante_id']);
+
+  IF v_motivo IS NULL THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('VALIDATION_ERROR',
+        'Indica el motivo de la nota de crédito','motivo'));
+  END IF;
+
+  SELECT * INTO v_ref FROM core.comprobantes
+   WHERE id = (p_payload->>'comprobante_id')::uuid AND deleted_at IS NULL
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id);
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Comprobante no encontrado','comprobante_id'));
+  END IF;
+
+  IF v_ref.tipo IN ('nota_credito','nota_debito') THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('BUSINESS_RULE',
+        'Una nota de crédito no se emite sobre otra nota'));
+  END IF;
+
+  IF v_ref.anulado_at IS NOT NULL THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('BUSINESS_RULE',
+        'El comprobante está anulado: no hay nada que acreditar'));
+  END IF;
+
+  v_serie  := COALESCE(NULLIF(p_payload->>'serie',''),
+                       CASE WHEN v_ref.tipo = 'factura' THEN 'FC01' ELSE 'BC01' END);
+  v_numero := internal.siguiente_numero_documento(v_emp, 'nota_credito', v_serie);
+
+  INSERT INTO core.comprobantes (
+    empresa_id, tipo, serie, numero, cliente_id, mascota_id, consulta_id,
+    fecha_emision, moneda, tipo_cambio, estado, estado_pago,
+    documento_ref_id, motivo_nota, observaciones, created_by
+  ) VALUES (
+    v_emp, 'nota_credito', v_serie, v_numero, v_ref.cliente_id, v_ref.mascota_id,
+    v_ref.consulta_id, now(), v_ref.moneda, v_ref.tipo_cambio,
+    'emitido', 'pagado', v_ref.id, v_motivo, p_payload->>'observaciones', p_user_id
+  ) RETURNING id INTO v_id;
+
+  -- Sin detalle: la nota cubre lo que aún no se ha acreditado del comprobante.
+  IF jsonb_array_length(v_items) = 0 THEN
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('comprobante_item_id', ci.id)), '[]'::jsonb)
+      INTO v_items
+      FROM core.comprobante_items ci WHERE ci.comprobante_id = v_ref.id;
+  END IF;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(v_items) LOOP
+    SELECT * INTO v_ci FROM core.comprobante_items
+     WHERE id = (v_item->>'comprobante_item_id')::uuid AND comprobante_id = v_ref.id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'El ítem indicado no pertenece al comprobante' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- Lo ya acreditado de este ítem en notas anteriores. No se puede devolver
+    -- más de lo que se cobró, ni sumando varias notas parciales.
+    SELECT COALESCE(SUM(nci.cantidad), 0) INTO v_acred
+      FROM core.comprobante_items nci
+      JOIN core.comprobantes nc ON nc.id = nci.comprobante_id
+     WHERE nci.item_ref_id = v_ci.id
+       AND nc.tipo = 'nota_credito' AND nc.anulado_at IS NULL AND nc.deleted_at IS NULL;
+
+    v_cant := COALESCE((v_item->>'cantidad')::numeric, v_ci.cantidad - v_acred);
+
+    IF v_cant > v_ci.cantidad - v_acred THEN
+      RAISE EXCEPTION
+        'Del ítem "%" ya se acreditaron % de %: no se puede acreditar % más',
+        v_ci.descripcion, v_acred, v_ci.cantidad, v_cant USING ERRCODE = 'P0001';
+    END IF;
+
+    IF v_cant <= 0 THEN CONTINUE; END IF;
+
+    v_orden := v_orden + 1;
+    INSERT INTO core.comprobante_items (
+      comprobante_id, tipo_item, servicio_id, producto_id, orden_servicio_id,
+      insumo_id, item_ref_id, codigo, descripcion, cantidad, precio_unitario, descuento,
+      afecto_igv, subtotal, igv, total, orden
+    ) VALUES (
+      v_id, v_ci.tipo_item, v_ci.servicio_id, v_ci.producto_id, v_ci.orden_servicio_id,
+      v_ci.insumo_id, v_ci.id, v_ci.codigo, v_ci.descripcion, v_cant, v_ci.precio_unitario, 0,
+      v_ci.afecto_igv,
+      round(v_ci.subtotal * v_cant / v_ci.cantidad, 2),
+      round(v_ci.igv      * v_cant / v_ci.cantidad, 2),
+      round(v_ci.total    * v_cant / v_ci.cantidad, 2),
+      v_orden);
+
+    v_total := v_total + round(v_ci.total * v_cant / v_ci.cantidad, 2);
+
+    -- Devolución de producto vendido en mostrador: vuelve al almacén.
+    IF v_repone AND v_ci.producto_id IS NOT NULL AND v_ci.insumo_id IS NULL THEN
+      PERFORM internal.mover_stock(
+        v_emp, v_ci.producto_id, 'entrada', 'devolucion', v_cant, p_user_id, NULL,
+        jsonb_build_object('cliente_id', v_ref.cliente_id, 'comprobante_id', v_id,
+                           'observaciones', 'Nota de crédito ' || v_serie || '-' || v_numero));
+    END IF;
+  END LOOP;
+
+  IF v_orden = 0 THEN
+    RAISE EXCEPTION 'La nota de crédito no tiene ítems' USING ERRCODE = 'P0001';
+  END IF;
+
+  -- La nota baja la deuda del comprobante que corrige. Si lo cubre entero, ese
+  -- comprobante queda sin saldo y deja de aparecer en cobranzas.
+  UPDATE core.comprobantes
+     SET saldo_pendiente = GREATEST(saldo_pendiente - v_total, 0),
+         estado_pago = CASE WHEN GREATEST(saldo_pendiente - v_total, 0) <= 0
+                            THEN 'pagado'::core.estado_pago ELSE estado_pago END,
+         updated_at = now(), updated_by = p_user_id
+   WHERE id = v_ref.id;
+
+  -- Lo acreditado deja de estar cobrado: si fue un error de facturación, vuelve
+  -- a pendiente; si fue una devolución, ya no se le debe cobrar a nadie.
+  IF COALESCE((p_payload->>'devolver_a_pendientes')::boolean, false) THEN
+    UPDATE core.ordenes_servicio SET facturado = false, comprobante_id = NULL
+     WHERE id IN (SELECT ci.orden_servicio_id FROM core.comprobante_items ci
+                   WHERE ci.comprobante_id = v_id AND ci.orden_servicio_id IS NOT NULL);
+    UPDATE core.insumos_utilizados SET facturado = false
+     WHERE id IN (SELECT ci.insumo_id FROM core.comprobante_items ci
+                   WHERE ci.comprobante_id = v_id AND ci.insumo_id IS NOT NULL);
+  END IF;
+
+  PERFORM internal.registrar_auditoria(
+    p_user_id, v_emp, 'emitir_nota_credito', 'comprobantes', v_id, NULL,
+    jsonb_build_object('ref', v_ref.numero_completo, 'motivo', v_motivo, 'total', v_total));
+
+  RETURN jsonb_build_object('ok', true, 'data', (
+    SELECT jsonb_build_object(
+      'id', c.id, 'numero_completo', c.numero_completo, 'tipo', c.tipo,
+      'subtotal', c.subtotal, 'igv', c.igv, 'total', c.total,
+      'documento_ref', v_ref.numero_completo)
+    FROM core.comprobantes c WHERE c.id = v_id));
 
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));

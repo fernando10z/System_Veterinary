@@ -1,4 +1,6 @@
-import { IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from "class-validator";
+import {
+  IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min,
+} from "class-validator";
 
 const VIAS = ["oral","subcutanea","intramuscular","intravenosa","topica","oftalmica","otica","inhalatoria","rectal"];
 
@@ -9,8 +11,12 @@ export class AplicarVacunaDto {
   @IsOptional() @IsUUID() consulta_id?: string;
   @IsOptional() @IsUUID() cita_id?: string;
   @IsOptional() @IsUUID() esquema_id?: string;
-  /** Si se indica, la dosis se descuenta del inventario. */
+  /** Si se indica, la dosis se descuenta del inventario y se cobra. */
   @IsOptional() @IsUUID() producto_id?: string;
+  /** Dosis consumidas del producto. Por defecto 1. */
+  @IsOptional() @IsNumber() @Min(0.01) dosis_cantidad?: number;
+  /** Tarifa de aplicación: si se indica, queda pendiente de cobro. */
+  @IsOptional() @IsUUID() servicio_id?: string;
   @IsOptional() @IsString() @MaxLength(120) laboratorio?: string;
   @IsOptional() @IsString() @MaxLength(60) lote?: string;
   @IsOptional() @IsDateString() fecha_aplicacion?: string;

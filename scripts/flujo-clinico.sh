@@ -62,17 +62,25 @@ paso "Pendiente de facturar"
 PEND=$(gets "/clinico/pendiente-facturar/$CLI"); echo "${PEND:0:300}"
 
 paso "Boleta"
+# pendiente-facturar devuelve {servicios, insumos}: cada ítem ya trae la clave
+# de origen (orden_servicio_id / insumo_id) que el SP usa para marcarlo cobrado.
 ITEMS=$(echo "$PEND" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)['data']
-items=d if isinstance(d,list) else (d.get('items') or [])
-print(json.dumps([{
-  'tipo': i.get('tipo','servicio'),
-  'referencia_id': i['id'],
-  'descripcion': i.get('descripcion') or i.get('nombre',''),
-  'cantidad': float(i.get('cantidad',1)),
-  'precio_unitario': float(i.get('precio_unitario') or i.get('precio') or 0),
-} for i in items]))")
+items=(d.get('servicios') or []) + (d.get('insumos') or []) if isinstance(d,dict) else d
+salida=[]
+for i in items:
+  it={
+    'tipo_item': i.get('tipo_item') or i.get('tipo','servicio'),
+    'descripcion': i.get('descripcion') or i.get('nombre',''),
+    'cantidad': float(i.get('cantidad',1)),
+    'precio_unitario': float(i.get('precio_unitario') or 0),
+    'afecto_igv': bool(i.get('afecto_igv', True)),
+  }
+  for k in ('orden_servicio_id','insumo_id','servicio_id','producto_id','codigo'):
+    if i.get(k): it[k]=i[k]
+  salida.append(it)
+print(json.dumps(salida))")
 echo "items=${ITEMS:0:200}"
 R=$(post /facturacion "{\"cliente_id\":\"$CLI\",\"tipo\":\"boleta\",\"items\":$ITEMS}")
 COMP=$(echo "$R" | campo "d['id']"); echo "comprobante=$COMP  ${R:0:200}"
@@ -90,3 +98,6 @@ gets /caja/actual | campo "(d.get('numero'), d.get('estado'), d.get('ingresos'),
 
 paso "Historia clínica del paciente"
 gets "/mascotas/$MAS/historia" | campo "len(d if isinstance(d,list) else d.get('items',[]))"
+
+paso "Nada quedó sin cobrar"
+gets "/clinico/pendiente-facturar/$CLI" | campo "'servicios=%d insumos=%d' % (len(d['servicios']), len(d['insumos']))"

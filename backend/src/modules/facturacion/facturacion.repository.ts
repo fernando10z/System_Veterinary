@@ -18,6 +18,9 @@ export class FacturacionRepository {
   emitir(ctx: SpContext, p: Record<string, unknown>) {
     return this.sp.callCtx("app.sp_comprobante_emitir", ctx, [jsonbArg(p)]);
   }
+  emitirNotaCredito(ctx: SpContext, p: Record<string, unknown>) {
+    return this.sp.callCtx("app.sp_nota_credito_emitir", ctx, [jsonbArg(p)]);
+  }
   anular(ctx: SpContext, id: string, motivo: string) {
     return this.sp.callCtx("app.sp_comprobante_anular", ctx, [id, motivo]);
   }

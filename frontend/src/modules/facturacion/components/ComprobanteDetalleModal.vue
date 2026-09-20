@@ -27,6 +27,15 @@
             </div>
           </div>
 
+          <div v-if="c.documento_ref" class="callout" style="margin-bottom: 14px">
+            <FileMinus :size="15" />
+            <span>
+              Esta nota corrige el comprobante
+              <strong class="mono">{{ c.documento_ref.numero_completo }}</strong>.
+              <template v-if="c.motivo_nota"> Motivo: {{ c.motivo_nota }}.</template>
+            </span>
+          </div>
+
           <div class="detalle-grid" style="margin: 16px 0">
             <div class="detalle-item">
               <div class="k">Cliente</div>
@@ -81,6 +90,24 @@
             </div>
           </div>
 
+          <!-- Notas de crédito que corrigen este comprobante -->
+          <template v-if="(c.notas_credito ?? []).length">
+            <div class="section-title" style="margin-top: 18px">Notas de crédito</div>
+            <div class="tabla-wrap" style="margin-top: 8px">
+              <table>
+                <thead><tr><th>Número</th><th>Motivo</th><th>Fecha</th><th class="num">Monto</th></tr></thead>
+                <tbody>
+                  <tr v-for="n in c.notas_credito" :key="n.id">
+                    <td class="mono">{{ n.numero_completo }}</td>
+                    <td class="muted">{{ n.motivo || "—" }}</td>
+                    <td class="mono">{{ fmtFechaHora(n.fecha_emision) }}</td>
+                    <td class="num mono">− {{ fmtSoles(n.total) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+
           <!-- Pagos aplicados -->
           <template v-if="(c.pagos ?? []).length">
             <div class="section-title" style="margin-top: 18px">Pagos aplicados</div>
@@ -103,6 +130,9 @@
         <div class="m-foot modal-actions">
           <button class="btn" @click="$emit('close')">Cerrar</button>
           <button class="btn" @click="imprimir"><Printer :size="14" /> Imprimir</button>
+          <button v-if="puedeAcreditar" class="btn" @click="abrirNota">
+            <FileMinus :size="14" /> Nota de crédito
+          </button>
           <button
             v-if="puedeCobrar && Number(c.saldo_pendiente) > 0"
             class="btn primary"
@@ -113,12 +143,77 @@
         </div>
       </template>
     </div>
+
+    <!-- Nota de crédito: total, o sólo los ítems que se devuelven -->
+    <div v-if="modalNota" class="modal-back" @click.stop="modalNota = false">
+      <div class="modal" @click.stop>
+        <div class="m-head"><h3>Nota de crédito sobre {{ c.numero_completo }}</h3></div>
+        <div class="m-body">
+          <div class="field">
+            <label>Motivo <span class="req">*</span></label>
+            <select v-model="nota.motivo">
+              <option value="">Seleccionar…</option>
+              <option value="Anulación de la operación">Anulación de la operación</option>
+              <option value="Devolución total">Devolución total</option>
+              <option value="Devolución por ítem">Devolución por ítem</option>
+              <option value="Descuento global">Descuento global</option>
+              <option value="Error en la descripción">Error en la descripción</option>
+              <option value="Error en el RUC">Error en el RUC</option>
+            </select>
+            <small class="muted">Queda registrado en el documento y en la auditoría.</small>
+          </div>
+
+          <div class="field">
+            <label>Qué se acredita</label>
+            <div class="tabla-wrap">
+              <table>
+                <thead>
+                  <tr><th>Ítem</th><th class="num">Facturado</th><th class="num">A acreditar</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="i in c.items" :key="i.id">
+                    <td>{{ i.descripcion }}</td>
+                    <td class="num mono">{{ i.cantidad }}</td>
+                    <td class="num">
+                      <input
+                        v-model.number="nota.cantidades[i.id]"
+                        type="number"
+                        min="0"
+                        :max="Number(i.cantidad)"
+                        step="0.01"
+                        style="width: 90px; text-align: right"
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <small class="muted">Déjalo completo para acreditar el comprobante entero.</small>
+          </div>
+
+          <label class="check">
+            <input v-model="nota.repone_stock" type="checkbox" />
+            <span>El producto vuelve al almacén (devolución física)</span>
+          </label>
+          <label class="check">
+            <input v-model="nota.devolver_a_pendientes" type="checkbox" />
+            <span>Lo acreditado vuelve a quedar pendiente de cobro (error de facturación)</span>
+          </label>
+        </div>
+        <div class="m-foot modal-actions">
+          <button class="btn" @click="modalNota = false">Cancelar</button>
+          <button class="btn primary" :disabled="!nota.motivo || emitiendo" @click="emitirNota">
+            {{ emitiendo ? "Emitiendo…" : "Emitir nota de crédito" }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
-import { Loader2, Printer, Wallet } from "lucide-vue-next";
+import { ref, reactive, computed, onMounted } from "vue";
+import { Loader2, Printer, Wallet, FileMinus } from "lucide-vue-next";
 import { facturacionApi } from "../api/facturacion.api.js";
 import { pagosApi } from "../../pagos/api/pagos.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
@@ -134,6 +229,18 @@ const puedeCobrar = computed(() => hasPermission("pagos:registrar"));
 
 const c = ref(null);
 const cargando = ref(true);
+const modalNota = ref(false);
+const emitiendo = ref(false);
+const nota = reactive({ motivo: "", cantidades: {}, repone_stock: true, devolver_a_pendientes: false });
+
+// Una nota de crédito se emite sobre un comprobante vivo. Sobre otra nota, o
+// sobre uno ya anulado, no hay nada que acreditar.
+const puedeAcreditar = computed(() =>
+  hasPermission("facturacion:emitir") &&
+  c.value &&
+  !["nota_credito", "nota_debito"].includes(c.value.tipo) &&
+  !c.value.anulado_at,
+);
 
 async function cargar() {
   cargando.value = true;
@@ -146,6 +253,46 @@ async function cargar() {
 }
 
 function imprimir() { window.print(); }
+
+function abrirNota() {
+  // Se abre con todo marcado: el caso habitual es acreditar el comprobante
+  // entero, y quitar cantidades es más rápido que ponerlas.
+  nota.cantidades = Object.fromEntries((c.value.items ?? []).map((i) => [i.id, Number(i.cantidad)]));
+  nota.motivo = "";
+  nota.repone_stock = true;
+  nota.devolver_a_pendientes = false;
+  modalNota.value = true;
+}
+
+async function emitirNota() {
+  const items = (c.value.items ?? [])
+    .map((i) => ({ comprobante_item_id: i.id, cantidad: Number(nota.cantidades[i.id] ?? 0) }))
+    .filter((i) => i.cantidad > 0);
+
+  if (!items.length) {
+    notify.error("Nada que acreditar", "Indica al menos un ítem con cantidad mayor a cero.");
+    return;
+  }
+
+  emitiendo.value = true;
+  try {
+    const { data } = await facturacionApi.notaCredito({
+      comprobante_id: c.value.id,
+      motivo: nota.motivo,
+      items,
+      repone_stock: nota.repone_stock,
+      devolver_a_pendientes: nota.devolver_a_pendientes,
+    });
+    notify.success("Nota de crédito emitida", `${data.numero_completo} · ${fmtSoles(data.total)}`);
+    modalNota.value = false;
+    await cargar();
+    emit("cambiado");
+  } catch (e) {
+    notify.error("No se pudo emitir la nota de crédito", e.message);
+  } finally {
+    emitiendo.value = false;
+  }
+}
 
 async function cobrar() {
   const monto = await notify.prompt("Registrar cobro", {

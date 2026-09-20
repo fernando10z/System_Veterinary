@@ -3,6 +3,7 @@ import { FacturacionService } from "./facturacion.service";
 import { EmitirComprobanteDto } from "./dto/emitir-comprobante.dto";
 import { AnularComprobanteDto } from "./dto/anular-comprobante.dto";
 import { ActualizarSunatDto } from "./dto/actualizar-sunat.dto";
+import { EmitirNotaCreditoDto } from "./dto/emitir-nota-credito.dto";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { JwtPayload } from "../../common/types/jwt-payload.type";
 
@@ -56,6 +57,15 @@ export class FacturacionController {
   @Post()
   async emitir(@CurrentUser() u: JwtPayload, @Body() dto: EmitirComprobanteDto) {
     return { ok: true, data: await this.fact.emitir(u, dto) };
+  }
+
+  /**
+   * El camino para corregir un comprobante que ya salió. Anularlo solo vale
+   * mientras no haya llegado a SUNAT ni se haya cobrado.
+   */
+  @Post("notas-credito")
+  async notaCredito(@CurrentUser() u: JwtPayload, @Body() dto: EmitirNotaCreditoDto) {
+    return { ok: true, data: await this.fact.emitirNotaCredito(u, dto) };
   }
 
   @Patch(":id/anular")

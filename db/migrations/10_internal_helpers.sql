@@ -523,10 +523,107 @@ AS $$
 $$;
 
 -- -----------------------------------------------------------------------------
+-- internal.lotes_a_consumir — FEFO: qué lote sale primero
+--
+-- Devuelve la repartición de una salida entre los lotes del producto, del
+-- vencimiento más próximo al más lejano. Un lote vencido no se dispensa: solo
+-- lo consumen los movimientos que existen justamente para sacarlo del stock
+-- (merma, vencimiento, ajuste negativo).
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.lotes_a_consumir(
+  p_producto_id UUID,
+  p_cantidad    NUMERIC,
+  p_incluir_vencidos BOOLEAN DEFAULT false
+)
+RETURNS TABLE (lote_id UUID, cantidad NUMERIC, costo_unitario NUMERIC)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_resta NUMERIC := p_cantidad;
+  v_lote  RECORD;
+BEGIN
+  FOR v_lote IN
+    SELECT l.id, l.cantidad AS disponible, l.costo_unitario
+      FROM core.lotes l
+     WHERE l.producto_id = p_producto_id
+       AND l.cantidad > 0
+       AND (p_incluir_vencidos
+            OR l.fecha_vencimiento IS NULL
+            OR l.fecha_vencimiento >= CURRENT_DATE)
+     ORDER BY l.fecha_vencimiento NULLS LAST, l.created_at
+  LOOP
+    EXIT WHEN v_resta <= 0;
+    lote_id        := v_lote.id;
+    cantidad       := LEAST(v_resta, v_lote.disponible);
+    costo_unitario := v_lote.costo_unitario;
+    v_resta        := v_resta - cantidad;
+    RETURN NEXT;
+  END LOOP;
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- internal.mover_stock
 -- Única puerta de entrada para tocar inventario desde un SP: registra el
 -- movimiento y deja que el trigger ajuste stock/lotes/denormalizado.
+--
+-- Si el producto maneja lotes y quien llama no indica uno, la salida se reparte
+-- entre los lotes por FEFO y se registra un movimiento por lote. Así el kardex
+-- dice de qué lote salió cada dosis —lo que hay que poder responder cuando un
+-- laboratorio retira un lote del mercado— y el saldo del lote deja de mentir.
 -- -----------------------------------------------------------------------------
+-- -----------------------------------------------------------------------------
+-- internal.registrar_kardex — escribe una fila del kardex
+--
+-- Separada de mover_stock porque una salida repartida entre lotes escribe
+-- varias filas: una por lote. Nadie más debería llamarla: la puerta pública
+-- sigue siendo internal.mover_stock.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.registrar_kardex(
+  p_empresa_id  UUID,
+  p_producto_id UUID,
+  p_almacen_id  UUID,
+  p_tipo        core.tipo_movimiento_inventario,
+  p_motivo      core.motivo_movimiento,
+  p_cantidad    NUMERIC,
+  p_user_id     UUID,
+  p_refs        JSONB DEFAULT '{}'::jsonb
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_id UUID;
+BEGIN
+  INSERT INTO core.movimientos_inventario (
+    empresa_id, producto_id, almacen_id, almacen_destino_id, lote_id,
+    tipo, motivo, cantidad, costo_unitario,
+    cliente_id, proveedor_id, mascota_id, consulta_id, comprobante_id, orden_compra_id,
+    observaciones, created_by
+  ) VALUES (
+    p_empresa_id, p_producto_id, p_almacen_id,
+    NULLIF(p_refs->>'almacen_destino_id','')::uuid,
+    NULLIF(p_refs->>'lote_id','')::uuid,
+    p_tipo, p_motivo, p_cantidad,
+    COALESCE((p_refs->>'costo_unitario')::numeric, 0),
+    NULLIF(p_refs->>'cliente_id','')::uuid,
+    NULLIF(p_refs->>'proveedor_id','')::uuid,
+    NULLIF(p_refs->>'mascota_id','')::uuid,
+    NULLIF(p_refs->>'consulta_id','')::uuid,
+    NULLIF(p_refs->>'comprobante_id','')::uuid,
+    NULLIF(p_refs->>'orden_compra_id','')::uuid,
+    p_refs->>'observaciones', p_user_id
+  ) RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION internal.mover_stock(
   p_empresa_id  UUID,
   p_producto_id UUID,
@@ -543,9 +640,15 @@ SECURITY DEFINER
 SET search_path = core, internal, public
 AS $$
 DECLARE
-  v_id      UUID;
-  v_stock   NUMERIC;
-  v_almacen UUID;
+  v_id       UUID;
+  v_stock    NUMERIC;
+  v_almacen  UUID;
+  v_es_salida BOOLEAN;
+  v_lotes    BOOLEAN;
+  v_lote_ref UUID := NULLIF(p_refs->>'lote_id','')::uuid;
+  v_saca_vencidos BOOLEAN;
+  v_repartido NUMERIC := 0;
+  v_tramo    RECORD;
 BEGIN
   IF p_cantidad IS NULL OR p_cantidad <= 0 THEN
     RAISE EXCEPTION 'La cantidad del movimiento debe ser mayor a cero' USING ERRCODE = 'P0001';
@@ -555,8 +658,10 @@ BEGIN
     SELECT id FROM core.almacenes
      WHERE empresa_id = p_empresa_id AND es_principal = true LIMIT 1));
 
+  v_es_salida := p_tipo IN ('salida','ajuste_negativo','merma','vencimiento','transferencia');
+
   -- Una salida no puede dejar el stock en negativo
-  IF p_tipo IN ('salida','ajuste_negativo','merma','vencimiento','transferencia') THEN
+  IF v_es_salida THEN
     SELECT COALESCE(SUM(cantidad), 0) INTO v_stock
       FROM core.stock WHERE producto_id = p_producto_id
        AND (v_almacen IS NULL OR almacen_id = v_almacen);
@@ -566,24 +671,182 @@ BEGIN
     END IF;
   END IF;
 
-  INSERT INTO core.movimientos_inventario (
-    empresa_id, producto_id, almacen_id, almacen_destino_id, lote_id,
-    tipo, motivo, cantidad, costo_unitario,
-    cliente_id, proveedor_id, mascota_id, consulta_id, comprobante_id, orden_compra_id,
-    observaciones, created_by
+  SELECT maneja_lotes INTO v_lotes FROM core.productos WHERE id = p_producto_id;
+
+  -- Salida de un producto con lotes y sin lote indicado: se reparte por FEFO.
+  IF v_es_salida AND COALESCE(v_lotes, false) AND v_lote_ref IS NULL
+     AND p_tipo <> 'transferencia'
+     AND EXISTS (SELECT 1 FROM core.lotes WHERE producto_id = p_producto_id AND cantidad > 0)
+  THEN
+    -- Los movimientos que existen para retirar producto vencido sí lo alcanzan;
+    -- una salida clínica o una venta, no.
+    v_saca_vencidos := p_tipo IN ('merma','vencimiento','ajuste_negativo');
+
+    FOR v_tramo IN
+      SELECT * FROM internal.lotes_a_consumir(p_producto_id, p_cantidad, v_saca_vencidos)
+    LOOP
+      v_id := internal.registrar_kardex(
+        p_empresa_id, p_producto_id, v_almacen, p_tipo, p_motivo,
+        v_tramo.cantidad, p_user_id,
+        p_refs || jsonb_build_object(
+          'lote_id', v_tramo.lote_id,
+          'costo_unitario', COALESCE((p_refs->>'costo_unitario')::numeric, v_tramo.costo_unitario)));
+      v_repartido := v_repartido + v_tramo.cantidad;
+    END LOOP;
+
+    IF v_repartido < p_cantidad THEN
+      RAISE EXCEPTION
+        'Stock insuficiente en lotes vigentes: disponible %, solicitado %. Revisa vencimientos.',
+        v_repartido, p_cantidad USING ERRCODE = 'P0001';
+    END IF;
+
+    RETURN v_id;
+  END IF;
+
+  RETURN internal.registrar_kardex(
+    p_empresa_id, p_producto_id, v_almacen, p_tipo, p_motivo,
+    p_cantidad, p_user_id, p_refs);
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- internal.consumir_producto_clinico
+--
+-- Puerta única del consumo clínico: descuenta del inventario **y** deja el
+-- consumo pendiente de cobro. Antes cada acto clínico llamaba a mover_stock por
+-- su cuenta, así que la vacuna salía del almacén y no llegaba nunca a la
+-- cuenta del propietario. Un solo camino evita esa fuga.
+--
+-- La mascota se deriva del acto cuando quien llama no la manda: un insumo
+-- consumido en una consulta es, por definición, de ese paciente.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.consumir_producto_clinico(
+  p_empresa_id  UUID,
+  p_producto_id UUID,
+  p_cantidad    NUMERIC,
+  p_user_id     UUID,
+  p_refs        JSONB DEFAULT '{}'::jsonb   -- mascota_id, consulta_id, cirugia_id,
+                                            -- hospitalizacion_id, orden_servicio_id,
+                                            -- almacen_id, precio_unitario, observaciones
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_id      UUID;
+  v_mascota UUID := NULLIF(p_refs->>'mascota_id','')::uuid;
+  v_consulta UUID := NULLIF(p_refs->>'consulta_id','')::uuid;
+  v_cirugia  UUID := NULLIF(p_refs->>'cirugia_id','')::uuid;
+  v_hosp     UUID := NULLIF(p_refs->>'hospitalizacion_id','')::uuid;
+  v_precio  NUMERIC(12,2);
+BEGIN
+  -- El paciente se hereda del acto clínico si no vino explícito.
+  IF v_mascota IS NULL THEN
+    v_mascota := COALESCE(
+      (SELECT mascota_id FROM core.consultas         WHERE id = v_consulta),
+      (SELECT mascota_id FROM core.cirugias          WHERE id = v_cirugia),
+      (SELECT mascota_id FROM core.hospitalizaciones WHERE id = v_hosp));
+  END IF;
+
+  SELECT COALESCE(NULLIF(p_refs->>'precio_unitario','')::numeric, precio_venta)
+    INTO v_precio
+    FROM core.productos WHERE id = p_producto_id AND empresa_id = p_empresa_id;
+
+  IF v_precio IS NULL THEN
+    RAISE EXCEPTION 'Producto no encontrado' USING ERRCODE = 'P0002';
+  END IF;
+
+  PERFORM internal.mover_stock(
+    p_empresa_id, p_producto_id, 'salida', 'uso_clinico', p_cantidad, p_user_id,
+    NULLIF(p_refs->>'almacen_id','')::uuid,
+    jsonb_build_object(
+      'mascota_id', v_mascota,
+      'consulta_id', v_consulta,
+      'observaciones', COALESCE(p_refs->>'observaciones', 'Insumo usado en atención clínica')));
+
+  INSERT INTO core.insumos_utilizados (
+    empresa_id, producto_id, mascota_id, consulta_id, cirugia_id,
+    hospitalizacion_id, orden_servicio_id, cantidad, precio_unitario, created_by
   ) VALUES (
-    p_empresa_id, p_producto_id, v_almacen,
-    NULLIF(p_refs->>'almacen_destino_id','')::uuid,
-    NULLIF(p_refs->>'lote_id','')::uuid,
-    p_tipo, p_motivo, p_cantidad,
-    COALESCE((p_refs->>'costo_unitario')::numeric, 0),
-    NULLIF(p_refs->>'cliente_id','')::uuid,
-    NULLIF(p_refs->>'proveedor_id','')::uuid,
-    NULLIF(p_refs->>'mascota_id','')::uuid,
+    p_empresa_id, p_producto_id, v_mascota, v_consulta, v_cirugia, v_hosp,
+    NULLIF(p_refs->>'orden_servicio_id','')::uuid,
+    p_cantidad, v_precio, p_user_id
+  ) RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- internal.registrar_cargo_servicio
+--
+-- Deja un servicio prestado como pendiente de cobro. La usan los actos que
+-- tienen tarifa propia —vacunación, cirugía, día de hospitalización— para que
+-- el trabajo hecho llegue a la cuenta del propietario sin que recepción tenga
+-- que acordarse de agregarlo a mano.
+--
+-- Es idempotente por acto: llamarla dos veces sobre la misma cirugía no cobra
+-- dos veces.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.registrar_cargo_servicio(
+  p_empresa_id  UUID,
+  p_servicio_id UUID,
+  p_mascota_id  UUID,
+  p_user_id     UUID,
+  p_cantidad    NUMERIC DEFAULT 1,
+  p_refs        JSONB DEFAULT '{}'::jsonb   -- consulta_id, cita_id, veterinario_id,
+                                            -- descripcion, precio_unitario,
+                                            -- origen_tabla, origen_id
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_id      UUID;
+  v_cliente UUID;
+  v_precio  NUMERIC(12,2);
+  v_tabla   TEXT := NULLIF(p_refs->>'origen_tabla','');
+  v_origen  UUID := NULLIF(p_refs->>'origen_id','')::uuid;
+BEGIN
+  IF p_servicio_id IS NULL OR p_mascota_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = p_mascota_id;
+  IF v_cliente IS NULL THEN RETURN NULL; END IF;
+
+  SELECT COALESCE(NULLIF(p_refs->>'precio_unitario','')::numeric, s.precio)
+    INTO v_precio
+    FROM core.servicios s
+   WHERE s.id = p_servicio_id AND s.empresa_id = p_empresa_id AND s.deleted_at IS NULL;
+
+  IF v_precio IS NULL THEN RETURN NULL; END IF;
+
+  -- Idempotencia: el mismo acto no se cobra dos veces aunque se reabra.
+  IF v_tabla IS NOT NULL AND v_origen IS NOT NULL THEN
+    SELECT id INTO v_id FROM core.ordenes_servicio
+     WHERE empresa_id = p_empresa_id AND origen_tabla = v_tabla AND origen_id = v_origen
+       AND estado <> 'anulado';
+    IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+  END IF;
+
+  INSERT INTO core.ordenes_servicio (
+    empresa_id, codigo, mascota_id, cliente_id, servicio_id, veterinario_id,
+    cita_id, consulta_id, cantidad, precio_unitario, descuento, total,
+    descripcion, origen_tabla, origen_id, estado, created_by
+  ) VALUES (
+    p_empresa_id, internal.siguiente_numero(p_empresa_id, 'OS', 6),
+    p_mascota_id, v_cliente, p_servicio_id,
+    COALESCE(NULLIF(p_refs->>'veterinario_id','')::uuid, p_user_id),
+    NULLIF(p_refs->>'cita_id','')::uuid,
     NULLIF(p_refs->>'consulta_id','')::uuid,
-    NULLIF(p_refs->>'comprobante_id','')::uuid,
-    NULLIF(p_refs->>'orden_compra_id','')::uuid,
-    p_refs->>'observaciones', p_user_id
+    p_cantidad, v_precio, 0, round(p_cantidad * v_precio, 2),
+    p_refs->>'descripcion', v_tabla, v_origen,
+    'completado', p_user_id
   ) RETURNING id INTO v_id;
 
   RETURN v_id;

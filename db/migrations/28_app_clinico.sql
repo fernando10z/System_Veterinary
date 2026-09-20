@@ -448,14 +448,26 @@ BEGIN
     p_user_id
   ) RETURNING id INTO v_id;
 
-  -- La dosis sale del inventario si se indicó el producto.
+  -- La dosis sale del inventario si se indicó el producto, y queda pendiente de
+  -- cobro: una vacuna aplicada es producto entregado, no una merma.
   IF v_producto IS NOT NULL THEN
-    PERFORM internal.mover_stock(
-      v_emp, v_producto, 'salida', 'uso_clinico', 1, p_user_id, NULL,
+    PERFORM internal.consumir_producto_clinico(
+      v_emp, v_producto, COALESCE((p_payload->>'dosis_cantidad')::numeric, 1), p_user_id,
       jsonb_build_object('mascota_id', v_mascota,
-                         'consulta_id', p_payload->>'consulta_id',
+                         'consulta_id', NULLIF(p_payload->>'consulta_id','')::uuid,
                          'observaciones', 'Vacuna aplicada: ' || (p_payload->>'nombre_vacuna')));
   END IF;
+
+  -- El acto de vacunar tiene tarifa propia (aplicación, carné): si se indicó el
+  -- servicio, se cobra junto con la dosis.
+  PERFORM internal.registrar_cargo_servicio(
+    v_emp, NULLIF(p_payload->>'servicio_id','')::uuid, v_mascota, p_user_id, 1,
+    jsonb_build_object(
+      'consulta_id', NULLIF(p_payload->>'consulta_id','')::uuid,
+      'cita_id', NULLIF(p_payload->>'cita_id','')::uuid,
+      'veterinario_id', NULLIF(p_payload->>'veterinario_id','')::uuid,
+      'descripcion', 'Aplicación de ' || (p_payload->>'nombre_vacuna'),
+      'origen_tabla', 'vacunas', 'origen_id', v_id));
 
   PERFORM internal.registrar_evento_clinico(
     v_emp, v_mascota, v_cliente,
@@ -583,11 +595,23 @@ BEGIN
     p_user_id
   ) RETURNING id INTO v_id;
 
+  -- El antiparasitario entregado se descuenta y se cobra, igual que la vacuna.
   IF NULLIF(p_payload->>'producto_id','') IS NOT NULL THEN
-    PERFORM internal.mover_stock(
-      v_emp, (p_payload->>'producto_id')::uuid, 'salida', 'uso_clinico', 1, p_user_id, NULL,
-      jsonb_build_object('mascota_id', v_mascota, 'observaciones', 'Desparasitación'));
+    PERFORM internal.consumir_producto_clinico(
+      v_emp, (p_payload->>'producto_id')::uuid,
+      COALESCE((p_payload->>'cantidad')::numeric, 1), p_user_id,
+      jsonb_build_object('mascota_id', v_mascota,
+                         'consulta_id', NULLIF(p_payload->>'consulta_id','')::uuid,
+                         'observaciones', 'Desparasitación: ' || (p_payload->>'producto_nombre')));
   END IF;
+
+  PERFORM internal.registrar_cargo_servicio(
+    v_emp, NULLIF(p_payload->>'servicio_id','')::uuid, v_mascota, p_user_id, 1,
+    jsonb_build_object(
+      'consulta_id', NULLIF(p_payload->>'consulta_id','')::uuid,
+      'veterinario_id', NULLIF(p_payload->>'veterinario_id','')::uuid,
+      'descripcion', 'Desparasitación ' || COALESCE(p_payload->>'tipo','interna'),
+      'origen_tabla', 'desparasitaciones', 'origen_id', v_id));
 
   PERFORM internal.registrar_evento_clinico(
     v_emp, v_mascota, v_cliente, p_user_id, 'desparasitacion',
@@ -787,6 +811,7 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_cir RECORD;
+  v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
 
@@ -820,6 +845,19 @@ BEGIN
     estado          = COALESCE((p_payload->>'estado')::core.estado_cirugia, 'realizada'),
     updated_by      = p_user_id
   WHERE id = p_id;
+
+  -- La cirugía realizada deja su cargo. Es idempotente por cirugía: corregir el
+  -- parte quirúrgico no vuelve a cobrarla.
+  IF COALESCE((p_payload->>'estado')::core.estado_cirugia, 'realizada') = 'realizada' THEN
+    PERFORM internal.registrar_cargo_servicio(
+      v_emp, COALESCE(NULLIF(p_payload->>'servicio_id','')::uuid, v_cir.servicio_id),
+      v_cir.mascota_id, p_user_id, 1,
+      jsonb_build_object(
+        'cita_id', v_cir.cita_id,
+        'veterinario_id', v_cir.cirujano_id,
+        'descripcion', v_cir.nombre,
+        'origen_tabla', 'cirugias', 'origen_id', p_id));
+  END IF;
 
   PERFORM internal.registrar_auditoria(
     p_user_id, v_cir.empresa_id, 'registrar_resultado', 'cirugias', p_id, NULL, p_payload);
@@ -998,7 +1036,10 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_h RECORD;
+  v_h    RECORD;
+  v_emp  UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_alta TIMESTAMPTZ;
+  v_dias INT;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
 
@@ -1011,13 +1052,32 @@ BEGIN
       'error', internal.error_jsonb('NOT_FOUND','Hospitalización no encontrada'));
   END IF;
 
+  v_alta := COALESCE(NULLIF(p_payload->>'fecha_alta','')::timestamptz, now());
+
   UPDATE core.hospitalizaciones SET
-    fecha_alta        = COALESCE(NULLIF(p_payload->>'fecha_alta','')::timestamptz, now()),
+    fecha_alta        = v_alta,
     indicaciones_alta = COALESCE(p_payload->>'indicaciones_alta', indicaciones_alta),
     estado            = COALESCE((p_payload->>'estado')::core.estado_hospitalizacion, 'alta')
   WHERE id = p_id;
 
-  RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', p_id));
+  -- Días de internamiento. Se cobra el día de ingreso y cada día iniciado
+  -- después: así es como lo cobra una clínica, y así cuadra con lo que el
+  -- propietario ve en la factura.
+  v_dias := GREATEST(1, CEIL(EXTRACT(EPOCH FROM (v_alta - v_h.fecha_ingreso)) / 86400.0)::int);
+
+  PERFORM internal.registrar_cargo_servicio(
+    v_emp, NULLIF(p_payload->>'servicio_id','')::uuid, v_h.mascota_id, p_user_id, v_dias,
+    jsonb_build_object(
+      'veterinario_id', v_h.veterinario_id,
+      'descripcion', 'Hospitalización · ' || v_dias || ' día(s)',
+      'origen_tabla', 'hospitalizaciones', 'origen_id', p_id));
+
+  PERFORM internal.registrar_auditoria(
+    p_user_id, v_h.empresa_id, 'alta', 'hospitalizaciones', p_id, NULL,
+    jsonb_build_object('dias', v_dias, 'fecha_alta', v_alta));
+
+  RETURN jsonb_build_object('ok', true,
+    'data', jsonb_build_object('id', p_id, 'dias', v_dias));
 
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));
@@ -1356,26 +1416,12 @@ BEGIN
       'error', internal.error_jsonb('NOT_FOUND','Producto no encontrado','producto_id'));
   END IF;
 
-  -- mover_stock valida que haya existencias antes de descontar
-  PERFORM internal.mover_stock(
-    v_emp, v_prod, 'salida', 'uso_clinico', v_cant, p_user_id,
-    NULLIF(p_payload->>'almacen_id','')::uuid,
-    jsonb_build_object('mascota_id', p_payload->>'mascota_id',
-                       'consulta_id', p_payload->>'consulta_id',
-                       'observaciones', 'Insumo usado en atención clínica'));
-
-  INSERT INTO core.insumos_utilizados (
-    empresa_id, producto_id, mascota_id, consulta_id, cirugia_id,
-    hospitalizacion_id, orden_servicio_id, cantidad, precio_unitario, created_by
-  ) VALUES (
-    v_emp, v_prod,
-    NULLIF(p_payload->>'mascota_id','')::uuid,
-    NULLIF(p_payload->>'consulta_id','')::uuid,
-    NULLIF(p_payload->>'cirugia_id','')::uuid,
-    NULLIF(p_payload->>'hospitalizacion_id','')::uuid,
-    NULLIF(p_payload->>'orden_servicio_id','')::uuid,
-    v_cant, v_precio, p_user_id
-  ) RETURNING id INTO v_id;
+  -- Descuenta del inventario (por lote, FEFO) y deja el consumo pendiente de
+  -- cobro. El paciente se deriva del acto si no vino en el payload: sin eso, el
+  -- insumo salía del almacén y no llegaba nunca a la cuenta del propietario.
+  v_id := internal.consumir_producto_clinico(
+    v_emp, v_prod, v_cant, p_user_id,
+    p_payload || jsonb_build_object('precio_unitario', v_precio));
 
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', v_id));
 
@@ -1409,7 +1455,7 @@ BEGIN
       'error', internal.error_jsonb('NOT_FOUND','Cliente no encontrado'));
   END IF;
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
-           'orden_servicio_id', os.id, 'tipo', 'servicio',
+           'orden_servicio_id', os.id, 'tipo', 'servicio', 'tipo_item', 'servicio',
            'servicio_id', os.servicio_id, 'codigo', s.codigo,
            'descripcion', s.nombre || ' — ' || m.nombre,
            'cantidad', os.cantidad, 'precio_unitario', os.precio_unitario,
@@ -1424,8 +1470,12 @@ BEGIN
   -- Nota: el filtro por os.empresa_id ya acota el resultado a la empresa; un
   -- cliente de otra empresa simplemente no tiene órdenes aquí.
 
+  -- El insumo se imputa al propietario del paciente. Si el consumo no quedó
+  -- atado a un paciente (venta de mostrador registrada como insumo), se busca
+  -- por el acto clínico del que salió: lo que no se pueda imputar a un cliente
+  -- no debe desaparecer de la cobranza sin dejar rastro.
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
-           'insumo_id', iu.id, 'tipo', 'producto',
+           'insumo_id', iu.id, 'tipo', 'producto', 'tipo_item', 'producto',
            'producto_id', iu.producto_id, 'codigo', pr.codigo,
            'descripcion', pr.nombre,
            'cantidad', iu.cantidad, 'precio_unitario', iu.precio_unitario,
@@ -1434,7 +1484,11 @@ BEGIN
            'mascota', m.nombre) ORDER BY iu.fecha), '[]'::jsonb) INTO v_ins
   FROM core.insumos_utilizados iu
   JOIN core.productos pr ON pr.id = iu.producto_id
-  LEFT JOIN core.mascotas m ON m.id = iu.mascota_id
+  LEFT JOIN core.mascotas m
+         ON m.id = COALESCE(iu.mascota_id,
+                            (SELECT c.mascota_id FROM core.consultas c WHERE c.id = iu.consulta_id),
+                            (SELECT ci.mascota_id FROM core.cirugias ci WHERE ci.id = iu.cirugia_id),
+                            (SELECT h.mascota_id FROM core.hospitalizaciones h WHERE h.id = iu.hospitalizacion_id))
   WHERE iu.empresa_id = v_emp AND iu.facturado = false
     AND m.cliente_id = p_cliente_id;
 

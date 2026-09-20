@@ -1,6 +1,8 @@
-import { IsBoolean, IsDateString, IsIn, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsBoolean, IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
 
 export class ResultadoCirugiaDto {
+  /** Sobreescribe la tarifa de la cirugía programada al dejar el cargo. */
+  @IsOptional() @IsUUID() servicio_id?: string;
   @IsOptional() @IsDateString() fecha_inicio?: string;
   @IsOptional() @IsDateString() fecha_fin?: string;
   @IsOptional() @IsString() @MaxLength(120) anestesia_tipo?: string;

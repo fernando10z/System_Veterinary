@@ -628,6 +628,14 @@ CREATE TABLE IF NOT EXISTS core.ordenes_servicio (
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_by     UUID
 );
+-- De qué acto clínico nació el cargo. Permite que vacunación, cirugía u
+-- hospitalización dejen su cobro sin duplicarlo si el acto se reabre.
+ALTER TABLE core.ordenes_servicio ADD COLUMN IF NOT EXISTS origen_tabla VARCHAR(40);
+ALTER TABLE core.ordenes_servicio ADD COLUMN IF NOT EXISTS origen_id    UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ordenes_servicio_origen
+  ON core.ordenes_servicio (empresa_id, origen_tabla, origen_id)
+  WHERE origen_tabla IS NOT NULL AND estado <> 'anulado';
+
 CREATE INDEX IF NOT EXISTS ix_ordenes_servicio_empresa ON core.ordenes_servicio (empresa_id, fecha DESC);
 CREATE INDEX IF NOT EXISTS ix_ordenes_servicio_mascota ON core.ordenes_servicio (mascota_id, fecha DESC);
 CREATE INDEX IF NOT EXISTS ix_ordenes_servicio_pend    ON core.ordenes_servicio (empresa_id, cliente_id)
@@ -941,6 +949,19 @@ CREATE TABLE IF NOT EXISTS core.comprobante_items (
   total           NUMERIC(14,2) NOT NULL DEFAULT 0,
   orden           INT NOT NULL DEFAULT 0
 );
+-- El insumo que originó el ítem. Sin esta referencia, anular un comprobante no
+-- sabe qué consumos devolver al pool de pendientes.
+ALTER TABLE core.comprobante_items ADD COLUMN IF NOT EXISTS insumo_id UUID
+  REFERENCES core.insumos_utilizados(id) ON DELETE SET NULL;
+
+-- El ítem del comprobante original que esta línea de nota de crédito corrige.
+-- Sin esta referencia no hay forma exacta de saber cuánto de cada ítem ya se
+-- acreditó, y se podría acreditar más de lo que se facturó.
+ALTER TABLE core.comprobante_items ADD COLUMN IF NOT EXISTS item_ref_id UUID
+  REFERENCES core.comprobante_items(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ix_comprobante_items_ref ON core.comprobante_items (item_ref_id)
+  WHERE item_ref_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS ix_comprobante_items ON core.comprobante_items (comprobante_id);
 
 CREATE TABLE IF NOT EXISTS core.pagos (
