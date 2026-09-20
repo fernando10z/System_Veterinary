@@ -233,6 +233,8 @@ DECLARE
   v_total  INT;
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'pagos:ver');
+
   SELECT count(*) INTO v_total
   FROM core.pagos p
   WHERE (v_global OR p.empresa_id = v_emp)
@@ -479,6 +481,8 @@ DECLARE
   v_emp  UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'caja:ver');
+
   SELECT to_jsonb(x) INTO v_data FROM (
     SELECT c.id, c.numero, c.fecha_apertura, c.monto_apertura, c.estado,
            COALESCE((SELECT SUM(monto) FROM core.movimientos_caja mc
@@ -523,6 +527,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'caja:ver');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_apertura DESC), '[]'::jsonb) INTO v_data
   FROM (
     SELECT c.id, c.numero, c.fecha_apertura, c.fecha_cierre, c.monto_apertura,

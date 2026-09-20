@@ -32,6 +32,8 @@ DECLARE
   v_total  INT;
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'compras:ver');
+
   SELECT count(*) INTO v_total
   FROM core.proveedores p
   WHERE p.deleted_at IS NULL AND (v_global OR p.empresa_id = v_emp)
@@ -514,6 +516,8 @@ DECLARE
   v_total  INT;
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'compras:ver');
+
   SELECT count(*) INTO v_total
   FROM core.ordenes_compra oc
   WHERE oc.deleted_at IS NULL AND (v_global OR oc.empresa_id = v_emp)
@@ -709,6 +713,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'compras:ver');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_pago DESC), '[]'::jsonb) INTO v_data
   FROM (
     SELECT pp.id, pp.numero, pp.metodo, pp.monto, pp.moneda, pp.referencia,

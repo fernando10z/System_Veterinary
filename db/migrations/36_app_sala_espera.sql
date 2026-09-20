@@ -70,6 +70,8 @@ DECLARE
   v_data   JSONB;
   v_resumen JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.orden_triaje, x.llegada), '[]'::jsonb) INTO v_data
   FROM (
     SELECT c.id, c.codigo, c.estado, c.prioridad, c.motivo, c.origen,
@@ -315,6 +317,8 @@ DECLARE
   v_vet    UUID    := NULLIF(p_filtros->>'veterinario_id','')::uuid;
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.created_at), '[]'::jsonb) INTO v_data
   FROM (
     SELECT le.id, le.desde, le.hasta, le.nota, le.created_at,

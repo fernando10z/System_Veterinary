@@ -146,6 +146,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_objetivo), '[]'::jsonb) INTO v_data
   FROM (
     SELECT r.id, r.tipo, r.titulo, r.mensaje, r.fecha_objetivo, r.canal,
@@ -321,6 +323,8 @@ DECLARE
   v_emp  UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   -- Se listan TODOS los tipos, tengan plantilla propia o no: la que no se
   -- editó muestra el texto por defecto, que es el que se va a mandar.
   SELECT COALESCE(jsonb_agg(jsonb_build_object(

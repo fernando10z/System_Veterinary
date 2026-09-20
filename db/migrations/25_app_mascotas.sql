@@ -33,6 +33,8 @@ DECLARE
   v_total   INT;
   v_data    JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'mascotas:listar');
+
   SELECT count(*) INTO v_total
   FROM core.mascotas m
   JOIN core.clientes c ON c.id = m.cliente_id
@@ -118,6 +120,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'mascotas:listar');
+
   SELECT to_jsonb(x) INTO v_data FROM (
     SELECT m.id, m.codigo, m.nombre, m.sexo, m.color, m.senias_particulares,
            m.fecha_nacimiento, m.edad_aproximada_meses, m.peso_kg, m.tamanio,
@@ -223,6 +227,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   -- Si el paciente no es de la empresa, se responde NOT_FOUND igual que en el
   -- resto del módulo. Devolver una lista vacía sugeriría que existe pero no
   -- tiene historia, que es otra cosa.
@@ -483,6 +489,8 @@ DECLARE
   v_id  UUID;
   v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'mascotas:editar');
+
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','fecha_extravio']);
 
   IF NOT EXISTS (SELECT 1 FROM core.mascotas
@@ -530,6 +538,8 @@ AS $$
 DECLARE
   v_mascota UUID;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'mascotas:editar');
+
   UPDATE core.mascotas_extraviadas
      SET encontrado = true, fecha_hallazgo = CURRENT_DATE
    WHERE id = p_id
@@ -568,6 +578,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'mascotas:listar');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_extravio DESC), '[]'::jsonb) INTO v_data
   FROM (
     SELECT me.id, me.fecha_extravio, me.zona, me.descripcion, me.contacto,

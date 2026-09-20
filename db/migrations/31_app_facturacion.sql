@@ -33,6 +33,8 @@ DECLARE
   v_data   JSONB;
   v_totales JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:ver');
+
   SELECT count(*) INTO v_total
   FROM core.comprobantes c
   JOIN core.clientes cl ON cl.id = c.cliente_id
@@ -118,6 +120,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:ver');
+
   SELECT to_jsonb(x) INTO v_data FROM (
     SELECT c.*,
            jsonb_build_object(
@@ -526,6 +530,8 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:sunat');
+
   UPDATE core.comprobantes SET
     estado        = COALESCE((p_payload->>'estado')::core.estado_comprobante, estado),
     hash_cpe      = COALESCE(p_payload->>'hash_cpe', hash_cpe),
@@ -758,6 +764,8 @@ DECLARE
   v_data   JSONB;
   v_resumen JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:ver');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.dias_vencido DESC NULLS LAST), '[]'::jsonb) INTO v_data
   FROM (
     SELECT c.id, c.numero_completo, c.tipo, c.fecha_emision, c.fecha_vencimiento,

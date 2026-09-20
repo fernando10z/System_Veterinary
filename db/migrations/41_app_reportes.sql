@@ -24,6 +24,8 @@ DECLARE
   v_global BOOLEAN := internal.es_acceso_global(p_user_id, p_is_super_admin);
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'reportes:ver');
+
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
     'periodo', jsonb_build_object('desde', p_desde, 'hasta', p_hasta),
 
@@ -119,6 +121,8 @@ DECLARE
   v_global BOOLEAN := internal.es_acceso_global(p_user_id, p_is_super_admin);
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'reportes:ver');
+
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
     'periodo', jsonb_build_object('desde', p_desde, 'hasta', p_hasta),
 
@@ -203,6 +207,8 @@ DECLARE
   v_desde DATE := COALESCE(p_desde, date_trunc('month', CURRENT_DATE)::date);
   v_hasta DATE := COALESCE(p_hasta, CURRENT_DATE);
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'reportes:ver');
+
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
     'periodo', jsonb_build_object('desde', v_desde, 'hasta', v_hasta),
 
@@ -276,6 +282,8 @@ DECLARE
   v_global BOOLEAN := internal.es_acceso_global(p_user_id, p_is_super_admin);
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'reportes:ejecutivo');
+
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
     'periodo', jsonb_build_object('desde', p_desde, 'hasta', p_hasta),
 

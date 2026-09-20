@@ -262,6 +262,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT to_jsonb(x) INTO v_data FROM (
     SELECT c.*,
            m.nombre AS mascota, m.foto_url AS mascota_foto, m.alergias,
@@ -341,6 +343,8 @@ DECLARE
   v_total  INT;
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT count(*) INTO v_total
   FROM core.consultas c
   WHERE c.deleted_at IS NULL AND (v_global OR c.empresa_id = v_emp)
@@ -515,6 +519,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   IF NOT EXISTS (SELECT 1 FROM core.mascotas
                   WHERE id = p_mascota_id AND deleted_at IS NULL
                     AND (v_global OR empresa_id = v_emp)) THEN
@@ -886,6 +892,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha DESC NULLS LAST), '[]'::jsonb) INTO v_data
   FROM (
     SELECT c.id, c.codigo, c.nombre, c.descripcion, c.estado,
@@ -1101,6 +1109,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_ingreso DESC), '[]'::jsonb) INTO v_data
   FROM (
     SELECT h.id, h.codigo, h.jaula, h.motivo, h.diagnostico, h.estado,
@@ -1209,6 +1219,8 @@ DECLARE
   v_mascota UUID := (p_payload->>'mascota_id')::uuid;
   v_cliente UUID;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
+
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','nota']);
 
   SELECT cliente_id INTO v_cliente FROM core.mascotas
@@ -1248,6 +1260,8 @@ DECLARE
   v_mascota UUID := (p_payload->>'mascota_id')::uuid;
   v_cliente UUID;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
+
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','titulo','storage_key']);
 
   SELECT cliente_id INTO v_cliente FROM core.mascotas
@@ -1295,6 +1309,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   IF NOT EXISTS (SELECT 1 FROM core.mascotas
                   WHERE id = p_mascota_id AND deleted_at IS NULL
                     AND (v_global OR empresa_id = v_emp)) THEN
@@ -1448,6 +1464,8 @@ DECLARE
   v_serv  JSONB;
   v_ins   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:ver');
+
   IF NOT EXISTS (SELECT 1 FROM core.clientes c
                   WHERE c.id = p_cliente_id AND c.deleted_at IS NULL
                     AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, c.empresa_id)) THEN

@@ -35,6 +35,8 @@ DECLARE
   v_total  INT;
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   SELECT count(*) INTO v_total
   FROM core.citas c
   JOIN core.mascotas m ON m.id = c.mascota_id
@@ -127,6 +129,8 @@ DECLARE
   v_fecha DATE := COALESCE(p_fecha, CURRENT_DATE);
   v_data  JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   SELECT jsonb_build_object(
     'fecha', v_fecha,
     'resumen', jsonb_build_object(
@@ -180,6 +184,8 @@ DECLARE
   v_fin      TIMESTAMPTZ;
   v_ocupado  BOOLEAN;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   SELECT COALESCE(p_duracion_min, duracion_cita_min) INTO v_dur
     FROM core.empresas WHERE id = v_emp;
   v_dur := COALESCE(v_dur, 30);
@@ -490,6 +496,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   SELECT to_jsonb(x) INTO v_data FROM (
     SELECT c.*,
            m.nombre AS mascota, m.foto_url AS mascota_foto, m.alergias,

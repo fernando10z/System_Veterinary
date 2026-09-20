@@ -77,6 +77,14 @@ BEGIN
   SELECT to_jsonb(e) - 'pse_password_enc' INTO v_data
   FROM core.empresas e WHERE e.id = v_target AND e.deleted_at IS NULL;
 
+  -- La clave del PSE ya no sale nunca; el usuario y el endpoint tampoco tienen
+  -- por qué verlos recepción ni el almacén: es media credencial, y con ella el
+  -- proveedor solo pide la otra mitad.
+  IF v_data IS NOT NULL
+     AND NOT internal.tiene_permiso(p_user_id, 'empresa:configurar') THEN
+    v_data := v_data - 'pse_usuario' - 'pse_endpoint';
+  END IF;
+
   IF v_data IS NULL THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Empresa no encontrada'));
@@ -183,6 +191,8 @@ AS $$
 DECLARE
   v_antes JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'empresa:configurar');
+
   PERFORM internal.assert_acceso_empresa(p_user_id, p_id, p_is_super_admin);
 
   SELECT to_jsonb(e) - 'pse_password_enc' INTO v_antes

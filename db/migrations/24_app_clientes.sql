@@ -36,6 +36,8 @@ DECLARE
   v_total  INT;
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clientes:listar');
+
   SELECT count(*) INTO v_total
   FROM core.clientes c
   WHERE c.deleted_at IS NULL
@@ -127,6 +129,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clientes:listar');
+
   SELECT to_jsonb(x) INTO v_data FROM (
     SELECT c.id, c.codigo, c.tipo_documento, c.numero_documento,
            c.nombres, c.apellido_paterno, c.apellido_materno, c.razon_social,
@@ -207,6 +211,8 @@ DECLARE
   v_q      TEXT    := internal.normalizar(p_query);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clientes:listar');
+
   IF v_q IS NULL OR length(v_q) < 2 THEN
     RETURN jsonb_build_object('ok', true, 'data', '[]'::jsonb);
   END IF;
@@ -520,6 +526,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clientes:listar');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha DESC), '[]'::jsonb) INTO v_data
   FROM (
     SELECT co.id, co.tipo, co.asunto, co.mensaje, co.fecha,
@@ -560,6 +568,8 @@ DECLARE
   v_id  UUID;
   v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clientes:editar');
+
   PERFORM internal.validar_payload(p_payload, ARRAY['cliente_id','mensaje']);
 
   INSERT INTO core.comunicaciones (

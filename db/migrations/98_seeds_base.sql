@@ -57,7 +57,14 @@ INSERT INTO core.permisos (codigo, modulo, accion, descripcion) VALUES
   ('usuarios:eliminar',    'usuarios',    'eliminar',   'Eliminar usuarios'),
   ('usuarios:asignar_rol', 'usuarios',    'asignar_rol','Cambiar el rol de un usuario'),
   ('auditoria:ver',        'auditoria',   'ver',        'Ver la bitácora del sistema'),
-  ('empresas:gestionar',   'empresas',    'gestionar',  'Administrar empresas')
+  ('empresas:gestionar',   'empresas',    'gestionar',  'Administrar empresas'),
+  -- Configurar la PROPIA empresa (series, IGV, datos fiscales, credenciales del
+  -- PSE) es distinto de administrar el padrón de empresas: lo primero lo hace el
+  -- administrador de la clínica, lo segundo solo el super administrador.
+  ('empresa:configurar',   'empresas',    'configurar', 'Configurar los datos y series de su empresa'),
+  -- Cambiar a mano el estado de un comprobante ante SUNAT (cargar el CDR, marcar
+  -- aceptado) decide lo que la clínica declara: no es cosa de mostrador.
+  ('facturacion:sunat',    'facturacion', 'sunat',      'Cargar o corregir la respuesta de SUNAT')
 ON CONFLICT (codigo) DO UPDATE
   SET modulo = EXCLUDED.modulo, accion = EXCLUDED.accion, descripcion = EXCLUDED.descripcion;
 
@@ -130,9 +137,9 @@ INSERT INTO core.rol_permisos (rol_id, permiso_id)
 SELECT r.id, p.id FROM core.roles r, core.permisos p
 WHERE r.codigo = 'contador'
   AND p.codigo IN ('dashboard:ver','clientes:listar','facturacion:ver','facturacion:emitir',
-                   'facturacion:anular','pagos:ver','pagos:registrar','pagos:anular',
-                   'caja:ver','compras:ver','compras:pagar','reportes:ver','reportes:ejecutivo',
-                   'auditoria:ver');
+                   'facturacion:anular','facturacion:sunat','pagos:ver','pagos:registrar',
+                   'pagos:anular','caja:ver','compras:ver','compras:pagar','inventario:ver',
+                   'reportes:ver','reportes:ejecutivo','auditoria:ver');
 
 -- =============================================================================
 -- 3. MAESTROS: especializaciones, especies, razas

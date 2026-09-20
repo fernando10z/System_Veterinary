@@ -30,6 +30,8 @@ DECLARE
   v_total    INT;
   v_data     JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'usuarios:listar');
+
   SELECT count(*) INTO v_total
   FROM core.users u
   LEFT JOIN core.roles r ON r.id = u.rol_id
@@ -107,6 +109,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'usuarios:listar');
+
   SELECT to_jsonb(x) INTO v_data FROM (
     SELECT u.id, u.codigo, u.email, u.nombres, u.apellido_paterno, u.apellido_materno,
            u.tipo_documento, u.numero_documento, u.telefono, u.foto_url,
@@ -167,10 +171,10 @@ BEGIN
   PERFORM internal.validar_payload(p_payload,
     ARRAY['email','password','nombres','apellido_paterno','numero_documento']);
 
-  IF length(p_payload->>'password') < 8 THEN
+  IF internal.password_invalida(p_payload->>'password', v_email) IS NOT NULL THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('VALIDATION_ERROR',
-        'La contraseña debe tener al menos 8 caracteres','password'));
+        internal.password_invalida(p_payload->>'password', v_email), 'password'));
   END IF;
 
   IF v_tipo_doc = 'DNI' AND NOT internal.validar_dni(v_doc) THEN
@@ -496,10 +500,10 @@ BEGIN
       'error', internal.error_jsonb('NOT_FOUND','Usuario no encontrado'));
   END IF;
 
-  IF length(p_password_temp) < 8 THEN
+  IF internal.password_invalida(p_password_temp) IS NOT NULL THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('VALIDATION_ERROR',
-        'La contraseña temporal debe tener al menos 8 caracteres','password_temp'));
+        internal.password_invalida(p_password_temp), 'password_temp'));
   END IF;
 
   UPDATE core.users

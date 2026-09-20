@@ -27,6 +27,8 @@ DECLARE
   v_prev_d DATE    := v_desde - v_dias;
   v_prev_h DATE    := v_desde - 1;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'dashboard:ver');
+
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
 
     'periodo', jsonb_build_object('desde', v_desde, 'hasta', v_hasta, 'dias', v_dias),
@@ -181,6 +183,8 @@ DECLARE
   v_emp  UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_objetivo), '[]'::jsonb) INTO v_data
   FROM (
     SELECT r.id, r.tipo, r.titulo, r.mensaje, r.fecha_objetivo, r.canal,
@@ -216,6 +220,8 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:editar');
+
   UPDATE core.recordatorios SET completado = true, enviado_at = COALESCE(enviado_at, now())
    WHERE id = p_id
      AND internal.es_de_empresa(p_user_id, p_is_super_admin,

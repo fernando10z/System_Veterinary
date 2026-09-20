@@ -138,6 +138,8 @@ DECLARE
   v_c   RECORD;
   v_med JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT c.* INTO v_c FROM core.consultas c
    WHERE c.id = p_consulta_id AND c.deleted_at IS NULL
      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, c.empresa_id);
@@ -215,6 +217,8 @@ DECLARE
   v_vac    JSONB;
   v_desp   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT m.* INTO v_m FROM core.mascotas m
    WHERE m.id = p_mascota_id AND m.deleted_at IS NULL
      AND (v_global OR m.empresa_id = v_emp);
@@ -307,6 +311,8 @@ DECLARE
   v_cir RECORD;
   v_cla JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT c.*, s.nombre AS servicio, s.precio AS servicio_precio
     INTO v_cir
     FROM core.cirugias c
@@ -375,6 +381,8 @@ DECLARE
   v_evo  JSONB;
   v_med  JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT h.* INTO v_h FROM core.hospitalizaciones h
    WHERE h.id = p_hospitalizacion_id
      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, h.empresa_id);
@@ -465,6 +473,8 @@ DECLARE
   v_faltas   TEXT[] := ARRAY[]::TEXT[];
   v_firma    JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT m.* INTO v_m FROM core.mascotas m
    WHERE m.id = p_mascota_id AND m.deleted_at IS NULL
      AND (v_global OR m.empresa_id = v_emp);
@@ -577,6 +587,8 @@ DECLARE
   v_cons   JSONB;
   v_linea  JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'clinico:ver');
+
   SELECT m.* INTO v_m FROM core.mascotas m
    WHERE m.id = p_mascota_id AND m.deleted_at IS NULL
      AND (v_global OR m.empresa_id = v_emp);

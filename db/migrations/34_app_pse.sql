@@ -240,6 +240,8 @@ AS $$
 DECLARE
   v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
+
   UPDATE core.comprobantes
      SET estado          = 'enviado_sunat',
          pse_request_id  = p_request_id,
@@ -284,6 +286,8 @@ DECLARE
   v_emp    UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_estado core.estado_comprobante := (p_payload->>'estado')::core.estado_comprobante;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
+
   UPDATE core.comprobantes SET
     pse_response      = COALESCE(p_payload->'response', pse_response),
     xml_url           = COALESCE(NULLIF(p_payload->>'xml_url',''), xml_url),
@@ -336,6 +340,8 @@ AS $$
 DECLARE
   v_intento INT;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
+
   SELECT COALESCE(MAX(intento), 0) + 1 INTO v_intento
     FROM core.comprobante_pse_log WHERE comprobante_id = p_id;
 
@@ -380,6 +386,8 @@ DECLARE
   v_emp    UUID    := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data   JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_emision), '[]'::jsonb) INTO v_data
   FROM (
     SELECT c.id, c.numero_completo, c.tipo, c.fecha_emision, c.total, c.estado,

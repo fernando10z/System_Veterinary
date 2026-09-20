@@ -18,6 +18,8 @@ AS $$
 DECLARE
   v_data JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'usuarios:listar');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.scope, x.nombre), '[]'::jsonb) INTO v_data
   FROM (
     SELECT r.id, r.codigo, r.nombre, r.descripcion, r.scope, r.is_sistema,
@@ -50,6 +52,8 @@ AS $$
 DECLARE
   v_data JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'usuarios:asignar_rol');
+
   -- Agrupado por módulo: así la UI arma la matriz de permisos directamente.
   SELECT COALESCE(jsonb_agg(x ORDER BY x.modulo), '[]'::jsonb) INTO v_data
   FROM (

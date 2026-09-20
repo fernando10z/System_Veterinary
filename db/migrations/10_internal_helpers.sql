@@ -172,8 +172,16 @@ DECLARE
   v_rol_id   UUID;
   v_existe   INT;
 BEGIN
+  -- El token vive 15 minutos. Si en ese rato al usuario se le dio de baja o se
+  -- le desactivó la cuenta, el token sigue firmado y válido: la comprobación
+  -- del permiso es el único punto donde eso se puede notar.
   SELECT is_super_admin, rol_id INTO v_is_super, v_rol_id
-  FROM core.users WHERE id = p_user_id;
+  FROM core.users
+  WHERE id = p_user_id AND deleted_at IS NULL AND estado = 'activo';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'La cuenta no está activa' USING ERRCODE = '42501';
+  END IF;
 
   IF v_is_super = true THEN RETURN; END IF;
 
@@ -190,6 +198,120 @@ BEGIN
   IF v_existe IS NULL THEN
     RAISE EXCEPTION 'Permiso requerido: %', p_codigo_permiso USING ERRCODE = '42501';
   END IF;
+END;
+$$;
+
+
+
+
+-- -----------------------------------------------------------------------------
+-- internal.password_invalida
+-- Devuelve el motivo por el que una contraseña no sirve, o NULL si sirve.
+--
+-- Ocho caracteres a secas dejaban pasar "12345678" y el propio correo. En una
+-- clínica la clave se comparte de viva voz y se escribe con guantes: no tiene
+-- sentido exigir símbolos raros, pero sí que no sea adivinable de un vistazo.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.password_invalida(
+  p_password TEXT,
+  p_email    TEXT DEFAULT NULL
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_local TEXT;
+BEGIN
+  IF p_password IS NULL OR length(p_password) < 8 THEN
+    RETURN 'La contraseña debe tener al menos 8 caracteres';
+  END IF;
+  IF p_password !~ '[A-Za-zÁÉÍÓÚáéíóúÑñ]' THEN
+    RETURN 'La contraseña debe incluir al menos una letra';
+  END IF;
+  IF p_password !~ '[0-9]' THEN
+    RETURN 'La contraseña debe incluir al menos un número';
+  END IF;
+  IF lower(p_password) IN (
+       '12345678','123456789','contrasena','password','qwertyui','abc12345',
+       'clinica1','veterinaria1','admin123','11111111') THEN
+    RETURN 'Esa contraseña es demasiado común, elige otra';
+  END IF;
+  IF p_email IS NOT NULL THEN
+    v_local := split_part(lower(p_email), '@', 1);
+    IF length(v_local) >= 4 AND position(v_local IN lower(p_password)) > 0 THEN
+      RETURN 'La contraseña no puede contener tu correo';
+    END IF;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- internal.tiene_permiso — variante que responde en vez de abortar.
+-- assert_permiso corta la operación; esto sirve cuando el permiso no decide si
+-- se puede entrar, sino cuánto se ve una vez dentro.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.tiene_permiso(
+  p_user_id        UUID,
+  p_codigo_permiso VARCHAR
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+  SELECT COALESCE(
+    (SELECT u.is_super_admin FROM core.users u
+      WHERE u.id = p_user_id AND u.deleted_at IS NULL AND u.estado = 'activo'),
+    false)
+  OR EXISTS (
+    SELECT 1
+    FROM core.users u
+    JOIN core.rol_permisos rp ON rp.rol_id = u.rol_id
+    JOIN core.permisos p ON p.id = rp.permiso_id
+    WHERE u.id = p_user_id AND u.deleted_at IS NULL AND u.estado = 'activo'
+      AND p.codigo = p_codigo_permiso);
+$$;
+
+-- -----------------------------------------------------------------------------
+-- internal.usuario_objetivo
+-- Resuelve sobre QUÉ usuario actúa una operación de RRHH.
+--
+-- Marcar asistencia o pedir un permiso son acciones de autoservicio: cualquiera
+-- las hace para sí mismo. Hacerlas en nombre de otro es cosa de RRHH — si no,
+-- cualquiera podría fichar por un compañero o meterle vacaciones que, una vez
+-- aprobadas, le bloquean la agenda.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.usuario_objetivo(
+  p_actor    UUID,
+  p_target   UUID,
+  p_empresa  UUID,
+  p_permiso  VARCHAR DEFAULT 'rrhh:gestionar'
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_emp_target UUID;
+BEGIN
+  IF p_target IS NULL OR p_target = p_actor THEN RETURN p_actor; END IF;
+
+  PERFORM internal.assert_permiso(p_actor, p_permiso);
+
+  SELECT empresa_id INTO v_emp_target
+  FROM core.users WHERE id = p_target AND deleted_at IS NULL;
+
+  IF NOT FOUND
+     OR (v_emp_target IS DISTINCT FROM p_empresa
+         AND NOT internal.es_acceso_global(p_actor, false)) THEN
+    RAISE EXCEPTION 'Sin acceso al legajo de ese usuario' USING ERRCODE = '42501';
+  END IF;
+
+  RETURN p_target;
 END;
 $$;
 
@@ -232,10 +354,17 @@ BEGIN
     v_diff := jsonb_build_object('_eliminado', p_antes);
   END IF;
 
+  -- La IP y el agente los deja el backend como ajustes de sesión antes de
+  -- llamar al SP (`app.client_ip`, `app.user_agent`). El segundo argumento de
+  -- current_setting evita que reviente cuando no están: hay SPs que se llaman
+  -- desde psql o desde un cron, y ahí simplemente no hay petición HTTP.
   INSERT INTO core.audit_log (
-    user_id, empresa_id, accion, entidad, entidad_id, datos_antes, datos_despues, diff
+    user_id, empresa_id, accion, entidad, entidad_id, datos_antes, datos_despues, diff,
+    ip, user_agent
   ) VALUES (
-    p_user_id, p_empresa_id, p_accion, p_entidad, p_entidad_id, p_antes, p_despues, v_diff
+    p_user_id, p_empresa_id, p_accion, p_entidad, p_entidad_id, p_antes, p_despues, v_diff,
+    NULLIF(current_setting('app.client_ip', true), ''),
+    NULLIF(current_setting('app.user_agent', true), '')
   ) RETURNING id INTO v_id;
 
   RETURN v_id;

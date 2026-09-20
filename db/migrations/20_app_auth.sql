@@ -38,9 +38,12 @@ BEGIN
       'error', internal.error_jsonb('UNAUTHORIZED','Credenciales inválidas'));
   END IF;
 
+  -- Misma respuesta que para un correo que no existe: "la cuenta no está
+  -- activa" confirmaba que ese correo SÍ es de alguien de la clínica, que es
+  -- justo lo que busca quien está probando direcciones.
   IF v_user.estado <> 'activo' THEN
     RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('FORBIDDEN','La cuenta no está activa'));
+      'error', internal.error_jsonb('UNAUTHORIZED','Credenciales inválidas'));
   END IF;
 
   IF v_user.bloqueado_hasta IS NOT NULL AND v_user.bloqueado_hasta > now() THEN
@@ -169,7 +172,8 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_hash TEXT;
+  v_hash   TEXT;
+  v_motivo TEXT;
 BEGIN
   SELECT password_hash INTO v_hash FROM core.users WHERE id = p_user_id;
   IF NOT FOUND THEN
@@ -182,10 +186,11 @@ BEGIN
       'error', internal.error_jsonb('FORBIDDEN','La contraseña actual es incorrecta','password_actual'));
   END IF;
 
-  IF length(p_password_nuevo) < 8 THEN
+  v_motivo := internal.password_invalida(
+    p_password_nuevo, (SELECT email FROM core.users WHERE id = p_user_id));
+  IF v_motivo IS NOT NULL THEN
     RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('VALIDATION_ERROR',
-        'La contraseña nueva debe tener al menos 8 caracteres','password_nuevo'));
+      'error', internal.error_jsonb('VALIDATION_ERROR', v_motivo, 'password_nuevo'));
   END IF;
 
   UPDATE core.users
@@ -258,11 +263,12 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_user_id UUID;
+  v_motivo  TEXT;
 BEGIN
-  IF length(p_password_nuevo) < 8 THEN
+  v_motivo := internal.password_invalida(p_password_nuevo);
+  IF v_motivo IS NOT NULL THEN
     RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('VALIDATION_ERROR',
-        'La contraseña debe tener al menos 8 caracteres','password'));
+      'error', internal.error_jsonb('VALIDATION_ERROR', v_motivo, 'password'));
   END IF;
 
   SELECT id INTO v_user_id FROM core.users

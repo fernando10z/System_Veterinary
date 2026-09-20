@@ -27,6 +27,8 @@ DECLARE
   v_emp  UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'citas:listar');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha, x.hora_inicio), '[]'::jsonb) INTO v_data
   FROM (
     SELECT d.id, d.fecha, d.hora_inicio, d.hora_fin, d.tipo, d.nota,
@@ -141,11 +143,14 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_emp    UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
-  v_target UUID := COALESCE(p_target_user_id, p_user_id);
+  v_target UUID;
   v_reg    RECORD;
   v_estado core.estado_asistencia := 'puntual';
   v_limite TIME;
 BEGIN
+  -- Fichar es autoservicio; fichar por un compañero, no.
+  v_target := internal.usuario_objetivo(p_user_id, p_target_user_id, v_emp);
+
   SELECT * INTO v_reg FROM core.asistencia
    WHERE user_id = v_target AND fecha = CURRENT_DATE;
 
@@ -200,7 +205,15 @@ DECLARE
   v_emp     UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
   v_data    JSONB;
   v_resumen JSONB;
+  -- Quien no administra RRHH ve su propio registro y nada más. Un veterinario
+  -- necesita consultar sus horas; no necesita las de sus compañeros.
+  v_todos   BOOLEAN := internal.tiene_permiso(p_user_id, 'rrhh:gestionar')
+                       OR internal.es_acceso_global(p_user_id, p_is_super_admin);
+  v_scope   UUID;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'rrhh:ver');
+  v_scope := CASE WHEN v_todos THEN p_target_user_id ELSE p_user_id END;
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha DESC, x.profesional), '[]'::jsonb) INTO v_data
   FROM (
     SELECT a.id, a.fecha, a.hora_entrada, a.hora_salida, a.horas_trabajadas,
@@ -212,7 +225,7 @@ BEGIN
     LEFT JOIN core.roles r ON r.id = u.rol_id
     WHERE a.empresa_id = v_emp
       AND a.fecha BETWEEN p_desde AND p_hasta
-      AND (p_target_user_id IS NULL OR a.user_id = p_target_user_id)
+      AND (v_scope IS NULL OR a.user_id = v_scope)
   ) x;
 
   SELECT jsonb_build_object(
@@ -224,7 +237,7 @@ BEGIN
   ) INTO v_resumen
   FROM core.asistencia a
   WHERE a.empresa_id = v_emp AND a.fecha BETWEEN p_desde AND p_hasta
-    AND (p_target_user_id IS NULL OR a.user_id = p_target_user_id);
+    AND (v_scope IS NULL OR a.user_id = v_scope);
 
   RETURN jsonb_build_object('ok', true, 'data', v_data, 'meta', v_resumen);
 
@@ -249,16 +262,22 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_id  UUID;
-  v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_id     UUID;
+  v_emp    UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_target UUID;
 BEGIN
   PERFORM internal.validar_payload(p_payload, ARRAY['fecha_inicio','fecha_fin']);
+
+  -- Un permiso aprobado bloquea la agenda del veterinario: pedirlo a nombre de
+  -- otro es una acción de RRHH, no de autoservicio.
+  v_target := internal.usuario_objetivo(
+    p_user_id, NULLIF(p_payload->>'user_id','')::uuid, v_emp);
 
   INSERT INTO core.permisos_laborales (
     empresa_id, user_id, tipo, fecha_inicio, fecha_fin, hora_inicio, hora_fin, motivo)
   VALUES (
     v_emp,
-    COALESCE(NULLIF(p_payload->>'user_id','')::uuid, p_user_id),
+    v_target,
     COALESCE((p_payload->>'tipo')::core.tipo_permiso_laboral, 'personal'),
     (p_payload->>'fecha_inicio')::date, (p_payload->>'fecha_fin')::date,
     NULLIF(p_payload->>'hora_inicio','')::time,
@@ -358,9 +377,19 @@ SECURITY DEFINER
 SET search_path = core, app, internal, public
 AS $$
 DECLARE
-  v_emp  UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
-  v_data JSONB;
+  v_emp   UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_data  JSONB;
+  -- El motivo de un permiso —una cita médica, un duelo— es dato personal del
+  -- compañero. Sin rrhh:gestionar, cada quien ve solo sus solicitudes.
+  v_todos BOOLEAN := internal.tiene_permiso(p_user_id, 'rrhh:gestionar')
+                     OR internal.es_acceso_global(p_user_id, p_is_super_admin);
+  v_scope UUID;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'rrhh:ver');
+  v_scope := CASE WHEN v_todos
+                  THEN NULLIF(p_filtros->>'user_id','')::uuid
+                  ELSE p_user_id END;
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.fecha_inicio DESC), '[]'::jsonb) INTO v_data
   FROM (
     SELECT pl.id, pl.tipo, pl.fecha_inicio, pl.fecha_fin, pl.hora_inicio, pl.hora_fin,
@@ -373,7 +402,7 @@ BEGIN
     LEFT JOIN core.users ua ON ua.id = pl.aprobado_por
     WHERE pl.empresa_id = v_emp
       AND (p_filtros->>'estado'  IS NULL OR pl.estado::text = p_filtros->>'estado')
-      AND (p_filtros->>'user_id' IS NULL OR pl.user_id = (p_filtros->>'user_id')::uuid)
+      AND (v_scope IS NULL OR pl.user_id = v_scope)
   ) x;
 
   RETURN jsonb_build_object('ok', true, 'data', v_data);
@@ -510,6 +539,8 @@ DECLARE
   v_hasta DATE := COALESCE(p_hasta, CURRENT_DATE);
   v_data  JSONB;
 BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'rrhh:ver');
+
   SELECT COALESCE(jsonb_agg(x ORDER BY x.profesional), '[]'::jsonb) INTO v_data
   FROM (
     SELECT u.id AS user_id,
