@@ -83,6 +83,30 @@ export const NAV_SECTIONS = [
   },
 ];
 
+
+/**
+ * Permiso exigido por cada ruta del backoffice, para que el router aplique lo
+ * mismo que el sidebar. El menú ocultaba la opción, pero escribir la URL a mano
+ * abría igual la pantalla: se veía vacía o con errores, y sobre todo daba la
+ * impresión de que el permiso no existía. El backend ya responde 403; esto solo
+ * evita el paseo.
+ *
+ * Las rutas de detalle heredan el permiso de su listado.
+ */
+export const PERMISO_POR_RUTA = (() => {
+  const mapa = {};
+  for (const sec of NAV_SECTIONS) {
+    for (const it of sec.items) {
+      if (it.requirePermission) mapa[it.to] = it.requirePermission;
+    }
+  }
+  // Detalles y pantallas que no están en el menú.
+  mapa["/pacientes/:id"] = "mascotas:listar";
+  mapa["/clientes/:id"] = "clientes:listar";
+  mapa["/consultas/:id"] = "clinico:ver";
+  return mapa;
+})();
+
 /** Aplana las secciones a los items visibles según permisos del usuario. */
 export function visibleNavItems(can, superAdmin) {
   const out = [];

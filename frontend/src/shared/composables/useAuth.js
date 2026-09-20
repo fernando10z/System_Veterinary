@@ -1,8 +1,7 @@
 import { reactive, computed } from "vue";
 import { apiFetch, auth } from "../api/client.js";
-import { ACCESS_TOKEN_KEY, USER_KEY } from "../config/api.config.js";
+import { ACCESS_TOKEN_KEY, USER_KEY, PERMS_KEY } from "../config/api.config.js";
 
-const PERMS_KEY = "vet_permisos";
 
 function loadStoredUser() {
   try {

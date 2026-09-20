@@ -40,6 +40,7 @@ export class AuthService {
       empresa_id: data.user.empresa_id,
       is_super_admin: data.user.is_super_admin,
       roles: data.rol ? [data.rol.codigo] : [],
+      must_change_password: data.user.must_change_password === true,
     };
 
     const jti = randomUUID();

@@ -74,6 +74,15 @@ export async function apiFetch(path, { method = "GET", body, headers = {}, _retr
     payload = null;
   }
 
+  // Clave temporal sin cambiar: el backend cierra todo menos el cambio de
+  // contraseña. Sin esto, la pantalla se llena de errores sin decir por qué.
+  if (res.status === 403 && payload?.error?.code === "PASSWORD_CHANGE_REQUIRED") {
+    if (typeof window !== "undefined"
+        && !window.location.pathname.endsWith("/cambiar-password")) {
+      window.location.href = "/cambiar-password";
+    }
+  }
+
   if (!res.ok || (payload && payload.ok === false)) {
     const err = new Error(payload?.error?.message ?? `HTTP ${res.status}`);
     err.code = payload?.error?.code;

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
-import { ACCESS_TOKEN_KEY, USER_KEY, PORTAL_TOKEN_KEY } from "../shared/config/api.config.js";
+import { ACCESS_TOKEN_KEY, USER_KEY, PERMS_KEY, PORTAL_TOKEN_KEY } from "../shared/config/api.config.js";
+import { PERMISO_POR_RUTA } from "../shared/config/navigation.js";
 import MainLayout from "../layouts/MainLayout.vue";
 
 // El login y el panel se cargan eager (son lo primero que ve el usuario);
@@ -157,12 +158,26 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 });
 
-function esSuperAdmin() {
+function usuarioGuardado() {
   try {
     const raw = localStorage.getItem(USER_KEY);
-    return raw ? !!JSON.parse(raw).is_super_admin : false;
+    return raw ? JSON.parse(raw) : null;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+function esSuperAdmin() {
+  return !!usuarioGuardado()?.is_super_admin;
+}
+
+function permisosGuardados() {
+  try {
+    const raw = localStorage.getItem(PERMS_KEY);
+    const v = raw ? JSON.parse(raw) : [];
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
   }
 }
 
@@ -179,9 +194,25 @@ router.beforeEach((to) => {
   }
   if (to.path === "/login" && autenticado) return { path: "/dashboard" };
 
+  // Con una clave temporal sin estrenar no se entra a ningún lado: el backend
+  // responde 403 a todo lo demás, así que dejar navegar solo confunde.
+  if (autenticado && usuarioGuardado()?.must_change_password
+      && to.path !== "/cambiar-password") {
+    return { path: "/cambiar-password" };
+  }
+
   // Defensa ante acceso por URL directa; el sidebar ya oculta estas rutas.
   if (to.meta.requiereSuperAdmin && autenticado && !esSuperAdmin()) {
     return { path: "/dashboard" };
+  }
+
+  // Mismo permiso que exige el sidebar para mostrar la opción.
+  if (autenticado && !esSuperAdmin()) {
+    const ruta = to.matched[to.matched.length - 1]?.path ?? to.path;
+    const permiso = PERMISO_POR_RUTA[ruta] ?? PERMISO_POR_RUTA[to.path];
+    if (permiso && !permisosGuardados().includes(permiso)) {
+      return { path: "/dashboard" };
+    }
   }
   return true;
 });
