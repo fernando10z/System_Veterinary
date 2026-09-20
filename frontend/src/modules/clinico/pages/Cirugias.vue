@@ -88,6 +88,15 @@
                 </span>
               </td>
               <td class="acciones-col">
+                <!-- El consentimiento se imprime ANTES de operar: sin él
+                     firmado, la cirugía no se puede cerrar. -->
+                <button
+                  class="btn mini"
+                  title="Imprimir consentimiento informado"
+                  @click="abrirDocumento('consentimiento', c.id, { auto: true })"
+                >
+                  <FileSignature :size="13" /> Consentimiento
+                </button>
                 <button
                   v-if="puedeRegistrar && c.estado !== 'realizada' && c.estado !== 'cancelada'"
                   class="btn mini primary"
@@ -167,11 +176,13 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from "vue";
-import { Scissors, RefreshCw, Loader2, Filter, AlertCircle } from "lucide-vue-next";
+import { Scissors, RefreshCw, Loader2, Filter, AlertCircle, FileSignature,
+} from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import { clinicoApi } from "../api/clinico.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtFechaHora, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
+import { abrirDocumento } from "../../../shared/print/abrir-documento.js";
 
 const { hasPermission } = useAuth();
 const puedeRegistrar = computed(() => hasPermission("clinico:registrar"));

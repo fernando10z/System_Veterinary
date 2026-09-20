@@ -25,6 +25,53 @@ const routes = [
     meta: { publica: true, requierePortal: true },
   },
 
+  // ---- Documentos imprimibles ----
+  //
+  // Van fuera del MainLayout: una hoja para imprimir no lleva sidebar ni
+  // topbar. Piden sesión igual que el backoffice —son datos clínicos—, y se
+  // abren en pestaña nueva desde la pantalla que las origina.
+  {
+    path: "/imprimir",
+    meta: { requiereAuth: true },
+    children: [
+      {
+        path: "comprobante/:id",
+        name: "imprimir-comprobante",
+        component: () => import("../modules/impresion/pages/Comprobante.vue"),
+      },
+      {
+        path: "receta/:id",
+        name: "imprimir-receta",
+        component: () => import("../modules/impresion/pages/Receta.vue"),
+      },
+      {
+        path: "carne/:id",
+        name: "imprimir-carne",
+        component: () => import("../modules/impresion/pages/CarneVacunacion.vue"),
+      },
+      {
+        path: "consentimiento/:id",
+        name: "imprimir-consentimiento",
+        component: () => import("../modules/impresion/pages/Consentimiento.vue"),
+      },
+      {
+        path: "alta/:id",
+        name: "imprimir-alta",
+        component: () => import("../modules/impresion/pages/AltaHospitalaria.vue"),
+      },
+      {
+        path: "certificado/:id",
+        name: "imprimir-certificado",
+        component: () => import("../modules/impresion/pages/CertificadoSalud.vue"),
+      },
+      {
+        path: "historia/:id",
+        name: "imprimir-historia",
+        component: () => import("../modules/impresion/pages/HistoriaClinica.vue"),
+      },
+    ],
+  },
+
   // ---- Backoffice ----
   {
     path: "/",

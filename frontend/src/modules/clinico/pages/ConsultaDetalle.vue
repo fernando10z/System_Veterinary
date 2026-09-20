@@ -17,6 +17,9 @@
           <router-link class="btn" :to="`/pacientes/${c.mascota_id}`">
             <PawPrint :size="14" /> Ficha del paciente
           </router-link>
+          <button class="btn" @click="abrirDocumento('receta', c.id, { auto: true })">
+            <FileText :size="14" /> Receta
+          </button>
           <button v-if="editable" class="btn" :disabled="guardando" @click="guardar">
             <Save :size="14" /> {{ guardando ? "Guardando…" : "Guardar" }}
           </button>
@@ -436,7 +439,7 @@ import { useRoute } from "vue-router";
 import {
   Loader2, ArrowLeft, Save, CheckCircle2, AlertCircle, AlertTriangle, Lock,
   MessageSquare, Activity, ClipboardCheck, Receipt, Package, Pill, Syringe,
-  FlaskConical, Plus, PawPrint,
+  FlaskConical, Plus, PawPrint, FileText,
 } from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import VacunaModal from "../components/VacunaModal.vue";
@@ -444,6 +447,7 @@ import { clinicoApi } from "../api/clinico.api.js";
 import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { inventarioApi } from "../../inventario/api/inventario.api.js";
 import { fmtSoles, capitalizar } from "../../../shared/components/ui/format.js";
+import { abrirDocumento } from "../../../shared/print/abrir-documento.js";
 
 const route = useRoute();
 const c = ref(null);

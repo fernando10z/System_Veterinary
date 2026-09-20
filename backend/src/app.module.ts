@@ -41,6 +41,7 @@ import { ReportesModule } from "./modules/reportes/reportes.module";
 import { PortalModule } from "./modules/portal/portal.module";
 import { AuditoriaModule } from "./modules/auditoria/auditoria.module";
 import { ArchivosModule } from "./modules/archivos/archivos.module";
+import { DocumentosModule } from "./modules/documentos/documentos.module";
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { ArchivosModule } from "./modules/archivos/archivos.module";
     PortalModule,
     AuditoriaModule,
     ArchivosModule,
+    DocumentosModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

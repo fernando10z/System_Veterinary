@@ -73,9 +73,16 @@
           </div>
         </div>
 
-        <div v-if="puedeRegistrar && ['ingresado', 'en_observacion'].includes(h.estado)" class="module-panel-foot">
-          <button class="btn" @click="abrirEvolucion(h)"><Plus :size="13" /> Registrar evolución</button>
-          <button class="btn primary" @click="abrirAlta(h)"><LogOut :size="13" /> Dar de alta</button>
+        <div class="module-panel-foot">
+          <!-- Se imprime también durante el internamiento: es el parte que
+               pide el propietario cuando viene a preguntar. -->
+          <button class="btn" @click="abrirDocumento('alta', h.id, { auto: true })">
+            <FileText :size="13" /> Informe
+          </button>
+          <template v-if="puedeRegistrar && ['ingresado', 'en_observacion'].includes(h.estado)">
+            <button class="btn" @click="abrirEvolucion(h)"><Plus :size="13" /> Registrar evolución</button>
+            <button class="btn primary" @click="abrirAlta(h)"><LogOut :size="13" /> Dar de alta</button>
+          </template>
         </div>
       </section>
     </div>
@@ -149,11 +156,13 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from "vue";
-import { BedDouble, RefreshCw, Plus, LogOut } from "lucide-vue-next";
+import { BedDouble, RefreshCw, Plus, LogOut, FileText,
+} from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import { clinicoApi } from "../api/clinico.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtFechaHora, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
+import { abrirDocumento } from "../../../shared/print/abrir-documento.js";
 
 const { hasPermission } = useAuth();
 const puedeRegistrar = computed(() => hasPermission("clinico:registrar"));

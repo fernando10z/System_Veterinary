@@ -14,6 +14,25 @@
       >
         <template #actions>
           <button class="btn" @click="$router.back()"><ArrowLeft :size="14" /> Volver</button>
+
+          <!-- Los papeles que el propietario se lleva del mostrador. -->
+          <div class="menu-docs">
+            <button class="btn" @click="menuDocs = !menuDocs">
+              <Printer :size="14" /> Documentos <ChevronDown :size="13" />
+            </button>
+            <div v-if="menuDocs" class="menu-docs-lista" @click="menuDocs = false">
+              <button @click="abrirDocumento('carne', p.id, { auto: true })">
+                <Syringe :size="13" /> Carné de vacunación
+              </button>
+              <button @click="abrirDocumento('historia', p.id, { auto: true })">
+                <ClipboardList :size="13" /> Historia clínica
+              </button>
+              <button @click="abrirDocumento('certificado', p.id)">
+                <FileCheck :size="13" /> Certificado de salud
+              </button>
+            </div>
+          </div>
+
           <button v-if="puedeEditar" class="btn" @click="modalEditar = true">
             <Pencil :size="14" /> Editar ficha
           </button>
@@ -271,7 +290,7 @@ import { ref, computed, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Loader2, ArrowLeft, Pencil, Stethoscope, AlertTriangle, User, TrendingUp,
-  ClipboardList, Syringe, Pill, Plus, Filter, BedDouble,
+  ClipboardList, Syringe, Pill, Plus, Filter, BedDouble, Printer, ChevronDown, FileCheck,
 } from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import PacienteModal from "../components/PacienteModal.vue";
@@ -281,6 +300,7 @@ import { mascotasApi } from "../api/mascotas.api.js";
 import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtDate } from "../../../shared/components/ui/format.js";
+import { abrirDocumento } from "../../../shared/print/abrir-documento.js";
 import { fmtFechaHora, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
 
 const route = useRoute();
@@ -295,6 +315,7 @@ const especies = ref([]);
 const cargando = ref(true);
 const tipoEvento = ref("");
 const modalEditar = ref(false);
+const menuDocs = ref(false);
 const modalVacuna = ref(false);
 const modalConsulta = ref(false);
 
@@ -391,4 +412,37 @@ watch(() => route.params.id, cargar);
   font-size: 11px; color: var(--ink-4); margin-top: 4px;
 }
 .btn.mini { height: 26px; padding: 0 9px; font-size: 11.5px; }
+
+/* Menú de documentos: se despliega bajo el botón del encabezado. */
+.menu-docs { position: relative }
+.menu-docs-lista {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 20;
+  min-width: 215px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 12%);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+}
+.menu-docs-lista button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+.menu-docs-lista button:hover { background: var(--bg-soft); color: var(--ink) }
 </style>

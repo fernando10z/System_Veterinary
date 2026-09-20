@@ -1,0 +1,199 @@
+/* =============================================================================
+   print.css — los documentos que la clínica entrega en papel.
+ 
+   Las vistas de impresión viven fuera del layout del backoffice: no tienen
+   sidebar ni topbar, y en pantalla se ven como la hoja que van a ser. Los
+   colores son fijos y no siguen el tema oscuro: el papel es blanco.
+   ============================================================================= */
+
+.doc-viewport {
+  min-height: 100vh;
+  background: #5b6360;
+  padding: 24px 16px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+/* Barra de acciones: sólo en pantalla. */
+.doc-toolbar {
+  position: sticky;
+  top: 12px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
+}
+.doc-toolbar .sep { flex: 1 }
+.doc-toolbar .aviso {
+  font-size: 12px;
+  color: #8a5a00;
+  background: #fff6e0;
+  border: 1px solid #f0dcae;
+  border-radius: 7px;
+  padding: 4px 9px;
+}
+
+/* La hoja. A4 por defecto; el ticket usa .hoja--ticket. */
+.hoja {
+  width: 210mm;
+  min-height: 297mm;
+  max-width: 100%;
+  background: #ffffff;
+  color: #101615;
+  padding: 16mm 15mm;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 30%);
+  font-size: 11.5px;
+  line-height: 1.5;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.hoja--ticket {
+  width: 80mm;
+  min-height: auto;
+  padding: 6mm 5mm;
+  font-size: 11px;
+  font-family: "SFMono-Regular", ui-monospace, "Cascadia Mono", Menlo, monospace;
+}
+
+/* ---- Membrete ---- */
+.doc-membrete {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  border-bottom: 2px solid #101615;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+.doc-membrete .marca { font-size: 17px; font-weight: 800; letter-spacing: -0.01em }
+.doc-membrete .datos { font-size: 10.5px; color: #4a5250; line-height: 1.45 }
+.doc-membrete .logo { max-height: 54px; max-width: 150px; object-fit: contain }
+
+/* Recuadro del tipo de documento, a la derecha del membrete. */
+.doc-tipo {
+  border: 1.5px solid #101615;
+  border-radius: 6px;
+  padding: 7px 14px;
+  text-align: center;
+  min-width: 165px;
+}
+.doc-tipo .t { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #4a5250 }
+.doc-tipo .n { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums }
+
+.doc-titulo {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0 0 14px;
+}
+
+/* ---- Bloques de datos ---- */
+.doc-bloque { margin-bottom: 13px; break-inside: avoid }
+.doc-bloque > h3 {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4a5250;
+  margin: 0 0 5px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #d8dedb;
+}
+.doc-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 3px 16px;
+}
+.doc-campo { display: flex; gap: 5px; font-size: 11px }
+.doc-campo .k { color: #5a625f; white-space: nowrap }
+.doc-campo .v { font-weight: 600; color: #101615 }
+.doc-campo.ancho { grid-column: 1 / -1 }
+
+/* ---- Tablas ---- */
+.doc-tabla { width: 100%; border-collapse: collapse; font-size: 10.8px; margin-top: 5px }
+.doc-tabla th {
+  text-align: left;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #4a5250;
+  border-bottom: 1.2px solid #101615;
+  padding: 5px 6px;
+  font-weight: 700;
+}
+.doc-tabla td { padding: 5px 6px; border-bottom: 1px solid #e4e9e7; vertical-align: top }
+.doc-tabla tr { break-inside: avoid }
+.doc-tabla .num { text-align: right; font-variant-numeric: tabular-nums }
+.doc-tabla .destacada td { background: #fdf6e3 }
+
+/* ---- Texto largo (cláusulas, indicaciones) ---- */
+.doc-texto { font-size: 10.8px; text-align: justify; white-space: pre-line; color: #232b2a }
+.doc-clausula { margin-bottom: 9px; break-inside: avoid }
+.doc-clausula h4 { font-size: 11px; margin: 0 0 2px; font-weight: 700 }
+
+/* ---- Aviso dentro del documento ---- */
+.doc-aviso {
+  border: 1px solid #e0c98f;
+  background: #fdf6e3;
+  border-radius: 5px;
+  padding: 7px 10px;
+  font-size: 10.5px;
+  margin-bottom: 12px;
+}
+.doc-aviso.grave { border-color: #e0a8a8; background: #fdeeee }
+
+/* ---- Firmas ---- */
+.doc-firmas {
+  display: flex;
+  gap: 40px;
+  justify-content: space-around;
+  margin-top: 34px;
+  break-inside: avoid;
+}
+.doc-firma { flex: 1; text-align: center; max-width: 230px }
+.doc-firma .linea { border-top: 1px solid #101615; margin-bottom: 5px; height: 42px }
+.doc-firma .nombre { font-weight: 700; font-size: 11px }
+.doc-firma .detalle { font-size: 10px; color: #4a5250 }
+
+.doc-pie {
+  margin-top: 22px;
+  padding-top: 8px;
+  border-top: 1px solid #d8dedb;
+  font-size: 9.5px;
+  color: #6b736f;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.doc-qr { display: block; width: 92px; height: 92px }
+.mono-doc { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" }
+
+/* =============================================================================
+   Impresión
+   ============================================================================= */
+@media print {
+  @page { size: A4; margin: 10mm }
+
+  html, body { background: #ffffff !important }
+  .doc-viewport { background: #ffffff; padding: 0; display: block; min-height: 0 }
+  .doc-toolbar, .no-imprimir { display: none !important }
+  .hoja {
+    width: auto;
+    min-height: 0;
+    box-shadow: none;
+    padding: 0;
+    /* Cada hoja empieza en página nueva: un carné y su historia no se pisan. */
+    break-after: page;
+  }
+  .hoja:last-child { break-after: auto }
+  .hoja--ticket { width: 72mm }
+  .doc-tabla .destacada td, .doc-aviso { -webkit-print-color-adjust: exact; print-color-adjust: exact }
+}

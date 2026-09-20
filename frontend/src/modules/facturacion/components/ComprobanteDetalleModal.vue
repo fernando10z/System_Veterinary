@@ -142,7 +142,8 @@
 
         <div class="m-foot modal-actions">
           <button class="btn" @click="$emit('close')">Cerrar</button>
-          <button class="btn" @click="imprimir"><Printer :size="14" /> Imprimir</button>
+          <button class="btn" @click="imprimir('ticket')"><Printer :size="14" /> Ticket</button>
+          <button class="btn" @click="imprimir('a4')"><FileText :size="14" /> A4</button>
           <button v-if="puedeAcreditar" class="btn" @click="abrirNota">
             <FileMinus :size="14" /> Nota de crédito
           </button>
@@ -234,7 +235,7 @@
 import { ref, reactive, computed, onMounted } from "vue";
 import {
   Loader2, Printer, Wallet, FileMinus, Send, RefreshCw,
-  CheckCircle2, AlertTriangle, Clock,
+  CheckCircle2, AlertTriangle, Clock, FileText,
 } from "lucide-vue-next";
 import { facturacionApi } from "../api/facturacion.api.js";
 import { pagosApi } from "../../pagos/api/pagos.api.js";
@@ -242,6 +243,7 @@ import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtSoles, fmtDate } from "../../../shared/components/ui/format.js";
 import { fmtFechaHora, capitalizar } from "../../../shared/components/ui/format.js";
 import { notify } from "../../../shared/composables/useNotify.js";
+import { abrirDocumento } from "../../../shared/print/abrir-documento.js";
 
 const props = defineProps({ comprobanteId: { type: String, required: true } });
 const emit = defineEmits(["close", "cambiado"]);
@@ -324,7 +326,13 @@ async function cargar() {
   }
 }
 
-function imprimir() { window.print(); }
+/**
+ * La representación impresa es un documento aparte, con membrete, importe en
+ * letras y el QR de SUNAT. Imprimir el modal recortaría todo eso.
+ */
+function imprimir(formato) {
+  abrirDocumento("comprobante", c.value.id, { auto: true, formato });
+}
 
 function abrirNota() {
   // Se abre con todo marcado: el caso habitual es acreditar el comprobante
