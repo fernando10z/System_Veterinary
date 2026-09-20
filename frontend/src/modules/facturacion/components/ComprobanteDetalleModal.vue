@@ -27,6 +27,19 @@
             </div>
           </div>
 
+          <!-- Estado ante SUNAT. Sólo aparece en documentos que existen para
+               SUNAT: una nota de venta es interna y no se envía. -->
+          <div v-if="sunat" :class="['callout', sunat.tono]" style="margin-bottom: 14px">
+            <component :is="sunat.icono" :size="15" />
+            <div style="flex: 1">
+              <strong>{{ sunat.titulo }}</strong>
+              <div class="muted">{{ sunat.detalle }}</div>
+              <div v-if="c.pse_request_id" class="muted mono" style="font-size: 11px">
+                {{ c.pse_request_id }}
+              </div>
+            </div>
+          </div>
+
           <div v-if="c.documento_ref" class="callout" style="margin-bottom: 14px">
             <FileMinus :size="15" />
             <span>
@@ -133,6 +146,12 @@
           <button v-if="puedeAcreditar" class="btn" @click="abrirNota">
             <FileMinus :size="14" /> Nota de crédito
           </button>
+          <button v-if="puedeEnviarSunat" class="btn" :disabled="enviandoSunat" @click="enviarSunat">
+            <Send :size="14" /> {{ enviandoSunat ? "Enviando…" : "Enviar a SUNAT" }}
+          </button>
+          <button v-if="puedeConsultarSunat" class="btn" :disabled="enviandoSunat" @click="consultarSunat">
+            <RefreshCw :size="14" /> Consultar estado
+          </button>
           <button
             v-if="puedeCobrar && Number(c.saldo_pendiente) > 0"
             class="btn primary"
@@ -213,7 +232,10 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from "vue";
-import { Loader2, Printer, Wallet, FileMinus } from "lucide-vue-next";
+import {
+  Loader2, Printer, Wallet, FileMinus, Send, RefreshCw,
+  CheckCircle2, AlertTriangle, Clock,
+} from "lucide-vue-next";
 import { facturacionApi } from "../api/facturacion.api.js";
 import { pagosApi } from "../../pagos/api/pagos.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
@@ -233,6 +255,8 @@ const modalNota = ref(false);
 const emitiendo = ref(false);
 const nota = reactive({ motivo: "", cantidades: {}, repone_stock: true, devolver_a_pendientes: false });
 
+const enviandoSunat = ref(false);
+
 // Una nota de crédito se emite sobre un comprobante vivo. Sobre otra nota, o
 // sobre uno ya anulado, no hay nada que acreditar.
 const puedeAcreditar = computed(() =>
@@ -241,6 +265,54 @@ const puedeAcreditar = computed(() =>
   !["nota_credito", "nota_debito"].includes(c.value.tipo) &&
   !c.value.anulado_at,
 );
+
+/** La nota de venta es un documento interno: no existe para SUNAT. */
+const esElectronico = computed(() => c.value && c.value.tipo !== "nota_venta");
+
+const puedeEnviarSunat = computed(
+  () =>
+    hasPermission("facturacion:emitir") &&
+    esElectronico.value &&
+    ["emitido", "pendiente_envio", "rechazado_sunat"].includes(c.value?.estado),
+);
+
+const puedeConsultarSunat = computed(
+  () => esElectronico.value && c.value?.estado === "enviado_sunat" && c.value?.pse_request_id,
+);
+
+/** Cómo se le cuenta al mostrador en qué punto está el documento ante SUNAT. */
+const sunat = computed(() => {
+  if (!esElectronico.value) return null;
+  const estado = c.value?.estado;
+  const msg = c.value?.sunat_mensaje;
+  const mapa = {
+    pendiente_envio: {
+      tono: "warn", icono: Clock, titulo: "Pendiente de envío a SUNAT",
+      detalle: "El comprobante está numerado y es cobrable, pero SUNAT todavía no lo vio.",
+    },
+    emitido: {
+      tono: "warn", icono: Clock, titulo: "Pendiente de envío a SUNAT",
+      detalle: "El comprobante está numerado y es cobrable, pero SUNAT todavía no lo vio.",
+    },
+    enviado_sunat: {
+      tono: "", icono: Clock, titulo: "Enviado · esperando el CDR",
+      detalle: msg || "SUNAT devuelve la constancia en unos minutos. Consulta el estado para actualizarlo.",
+    },
+    aceptado_sunat: {
+      tono: "ok", icono: CheckCircle2, titulo: "Aceptado por SUNAT",
+      detalle: msg || "El comprobante quedó registrado ante la administración tributaria.",
+    },
+    observado_sunat: {
+      tono: "warn", icono: AlertTriangle, titulo: "Aceptado con observaciones",
+      detalle: msg || "SUNAT lo aceptó, pero hay algo que corregir en la próxima emisión.",
+    },
+    rechazado_sunat: {
+      tono: "danger", icono: AlertTriangle, titulo: "Rechazado por SUNAT",
+      detalle: msg || "Corrige lo observado y vuelve a enviarlo.",
+    },
+  };
+  return mapa[estado] ?? null;
+});
 
 async function cargar() {
   cargando.value = true;
@@ -262,6 +334,38 @@ function abrirNota() {
   nota.repone_stock = true;
   nota.devolver_a_pendientes = false;
   modalNota.value = true;
+}
+
+async function enviarSunat() {
+  enviandoSunat.value = true;
+  try {
+    const { data } = await facturacionApi.enviarSunat(c.value.id);
+    if (data.estado === "rechazado_sunat") {
+      notify.error("SUNAT rechazó el comprobante", data.mensaje || `Código ${data.codigo_sunat}`);
+    } else {
+      notify.success("Comprobante enviado", data.mensaje || data.estado);
+    }
+    await cargar();
+    emit("cambiado");
+  } catch (e) {
+    notify.error("No se pudo enviar a SUNAT", e.message);
+  } finally {
+    enviandoSunat.value = false;
+  }
+}
+
+async function consultarSunat() {
+  enviandoSunat.value = true;
+  try {
+    const { data } = await facturacionApi.estadoSunat(c.value.id);
+    notify.success("Estado actualizado", data.mensaje || data.estado);
+    await cargar();
+    emit("cambiado");
+  } catch (e) {
+    notify.error("No se pudo consultar el estado", e.message);
+  } finally {
+    enviandoSunat.value = false;
+  }
 }
 
 async function emitirNota() {

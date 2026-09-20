@@ -207,6 +207,17 @@ BEGIN
     igv_tasa          = COALESCE((p_payload->>'igv_tasa')::numeric, igv_tasa),
     aforo_consultorios = COALESCE((p_payload->>'aforo_consultorios')::int, aforo_consultorios),
     duracion_cita_min = COALESCE((p_payload->>'duracion_cita_min')::int, duracion_cita_min),
+    serie_nota_credito_default = COALESCE(p_payload->>'serie_nota_credito_default', serie_nota_credito_default),
+    -- Datos fiscales que SUNAT exige del emisor. Se guardan por separado del
+    -- domicilio porque el proveedor los pide como nodos, y recortados a 30
+    -- caracteres: más largo y SUNAT rechaza el comprobante (error 113).
+    urbanizacion      = COALESCE(p_payload->>'urbanizacion', urbanizacion),
+    distrito          = COALESCE(p_payload->>'distrito', distrito),
+    provincia         = COALESCE(p_payload->>'provincia', provincia),
+    departamento      = COALESCE(p_payload->>'departamento', departamento),
+    emite_electronico = COALESCE((p_payload->>'emite_electronico')::boolean, emite_electronico),
+    pse_proveedor     = COALESCE(p_payload->>'pse_proveedor', pse_proveedor),
+    pse_ruc           = COALESCE(p_payload->>'pse_ruc', pse_ruc),
     pse_endpoint      = COALESCE(p_payload->>'pse_endpoint', pse_endpoint),
     pse_usuario       = COALESCE(p_payload->>'pse_usuario', pse_usuario),
     pse_password_enc  = COALESCE(p_payload->>'pse_password_enc', pse_password_enc),
@@ -214,8 +225,11 @@ BEGIN
     updated_by        = p_user_id
   WHERE id = p_id;
 
+  -- La clave del PSE no entra a la bitácora: el blob cifrado en la auditoría es
+  -- una copia más del secreto, en una tabla que lee más gente.
   PERFORM internal.registrar_auditoria(
-    p_user_id, p_id, 'actualizar', 'empresas', p_id, v_antes, p_payload);
+    p_user_id, p_id, 'actualizar', 'empresas', p_id, v_antes,
+    p_payload - 'pse_password_enc' - 'pse_password');
 
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', p_id));
 

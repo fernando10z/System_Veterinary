@@ -137,9 +137,18 @@ BEGIN
                      'id', i.id, 'tipo_item', i.tipo_item, 'codigo', i.codigo,
                      'descripcion', i.descripcion, 'cantidad', i.cantidad,
                      'precio_unitario', i.precio_unitario, 'descuento', i.descuento,
-                     'afecto_igv', i.afecto_igv, 'subtotal', i.subtotal,
+                     'afecto_igv', i.afecto_igv, 'tipo_afectacion_igv', i.tipo_afectacion_igv,
+                     'unidad_medida', i.unidad_medida, 'subtotal', i.subtotal,
                      'igv', i.igv, 'total', i.total) ORDER BY i.orden), '[]'::jsonb)
               FROM core.comprobante_items i WHERE i.comprobante_id = c.id) AS items,
+           -- Últimos intentos contra el PSE: cuando SUNAT rechaza, el mensaje
+           -- del proveedor es lo único que dice por qué.
+           (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                     'intento', l.intento, 'operacion', l.operacion, 'exito', l.exito,
+                     'mensaje', l.mensaje, 'fecha', l.created_at)
+                     ORDER BY l.created_at DESC), '[]'::jsonb)
+              FROM (SELECT * FROM core.comprobante_pse_log
+                     WHERE comprobante_id = c.id ORDER BY created_at DESC LIMIT 5) l) AS pse_log,
            (SELECT COALESCE(jsonb_agg(jsonb_build_object(
                      'id', pg.id, 'numero', pg.numero, 'metodo', pg.metodo,
                      'monto_aplicado', pa.monto_aplicado, 'fecha_pago', pg.fecha_pago,
@@ -206,6 +215,8 @@ DECLARE
   v_base     NUMERIC(14,2);
   v_igv_item NUMERIC(14,2);
   v_cli      RECORD;
+  v_electronico BOOLEAN;
+  v_estado   core.estado_comprobante;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
   PERFORM internal.validar_payload(p_payload, ARRAY['cliente_id']);
@@ -230,8 +241,9 @@ BEGIN
            WHEN 'factura' THEN COALESCE(serie_factura_default, 'F001')
            WHEN 'boleta'  THEN COALESCE(serie_boleta_default, 'B001')
            ELSE COALESCE(serie_nota_venta_default, 'NV01')
-         END
-    INTO v_tasa, v_serie
+         END,
+         emite_electronico
+    INTO v_tasa, v_serie, v_electronico
   FROM core.empresas WHERE id = v_emp;
 
   v_tasa  := COALESCE(v_tasa, 0.18);
@@ -271,6 +283,14 @@ BEGIN
         'No hay servicios ni productos pendientes de facturar para este cliente','items'));
   END IF;
 
+  -- Una factura o boleta de una empresa que emite electrónicamente nace
+  -- pendiente de envío: está numerada y es cobrable, pero SUNAT todavía no la
+  -- vio. La nota de venta es interna y no sale nunca.
+  v_estado := CASE
+    WHEN COALESCE(v_electronico, false) AND v_tipo IN ('factura','boleta')
+    THEN 'pendiente_envio'::core.estado_comprobante
+    ELSE 'emitido'::core.estado_comprobante END;
+
   v_numero := internal.siguiente_numero_documento(v_emp, v_tipo::text, v_serie);
 
   INSERT INTO core.comprobantes (
@@ -288,7 +308,7 @@ BEGIN
              CURRENT_DATE + COALESCE(v_cli.dias_credito, 0)),
     COALESCE((p_payload->>'moneda')::core.moneda_codigo, 'PEN'),
     COALESCE((p_payload->>'descuento_global')::numeric, 0),
-    'emitido', p_payload->>'observaciones', p_user_id
+    v_estado, p_payload->>'observaciones', p_user_id
   ) RETURNING id INTO v_id;
 
   FOR v_item IN SELECT * FROM jsonb_array_elements(v_items) LOOP
@@ -307,7 +327,7 @@ BEGIN
     INSERT INTO core.comprobante_items (
       comprobante_id, tipo_item, servicio_id, producto_id, orden_servicio_id,
       insumo_id, codigo, descripcion, cantidad, precio_unitario, descuento,
-      afecto_igv, subtotal, igv, total, orden
+      afecto_igv, tipo_afectacion_igv, unidad_medida, subtotal, igv, total, orden
     ) VALUES (
       v_id,
       -- El tipo se deduce del origen antes que de lo que mande el cliente: un
@@ -326,6 +346,15 @@ BEGIN
       (v_item->>'cantidad')::numeric, (v_item->>'precio_unitario')::numeric,
       COALESCE((v_item->>'descuento')::numeric, 0),
       COALESCE((v_item->>'afecto_igv')::boolean, true),
+      -- Catálogo SUNAT 07: 10 gravado, 20 exonerado. Un servicio veterinario
+      -- exonerado (casos de campañas) no puede declarar base gravada.
+      CASE WHEN COALESCE((v_item->>'afecto_igv')::boolean, true) THEN '10' ELSE '20' END,
+      -- Catálogo SUNAT 03: un producto se mide en unidades (NIU); un servicio
+      -- no tiene unidad física y va como ZZ.
+      COALESCE(NULLIF(v_item->>'unidad_medida',''),
+               CASE WHEN NULLIF(v_item->>'producto_id','') IS NOT NULL
+                         OR NULLIF(v_item->>'insumo_id','') IS NOT NULL
+                    THEN 'NIU' ELSE 'ZZ' END),
       v_base - v_igv_item, v_igv_item, v_base, v_orden);
 
     -- Marcar el origen como facturado para que no reaparezca en pendientes
@@ -412,10 +441,13 @@ BEGIN
       'error', internal.error_jsonb('BUSINESS_RULE','El comprobante ya está anulado'));
   END IF;
 
-  IF v_c.estado = 'aceptado_sunat' THEN
+  -- Una vez que el documento salió hacia SUNAT deja de ser nuestro: existe para
+  -- la administración tributaria. Lo que corresponde es la nota de crédito (o
+  -- la comunicación de baja, dentro del plazo), no borrarlo del sistema.
+  IF v_c.estado IN ('enviado_sunat','aceptado_sunat','observado_sunat') THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('BUSINESS_RULE',
-        'El comprobante fue aceptado por SUNAT: corresponde emitir una nota de crédito'));
+        'El comprobante ya fue enviado a SUNAT: corresponde emitir una nota de crédito'));
   END IF;
 
   -- Si ya se corrigió con una nota de crédito, anular encima devolvería el
@@ -555,6 +587,10 @@ DECLARE
   v_total   NUMERIC(14,2) := 0;
   v_acred   NUMERIC(12,2);
   v_repone  BOOLEAN := COALESCE((p_payload->>'repone_stock')::boolean, true);
+  v_electronico BOOLEAN;
+  -- Catálogo SUNAT 09. El motivo es dato del documento, no un default oculto:
+  -- SUNAT valida que el código corresponda a lo que dice la nota.
+  v_cod_nota TEXT := COALESCE(NULLIF(p_payload->>'codigo_tipo_nota',''), '01');
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
   PERFORM internal.validar_payload(p_payload, ARRAY['comprobante_id']);
@@ -585,18 +621,23 @@ BEGIN
         'El comprobante está anulado: no hay nada que acreditar'));
   END IF;
 
-  v_serie  := COALESCE(NULLIF(p_payload->>'serie',''),
-                       CASE WHEN v_ref.tipo = 'factura' THEN 'FC01' ELSE 'BC01' END);
+  SELECT emite_electronico,
+         COALESCE(NULLIF(p_payload->>'serie',''), serie_nota_credito_default,
+                  CASE WHEN v_ref.tipo = 'factura' THEN 'FC01' ELSE 'BC01' END)
+    INTO v_electronico, v_serie
+    FROM core.empresas WHERE id = v_emp;
   v_numero := internal.siguiente_numero_documento(v_emp, 'nota_credito', v_serie);
 
   INSERT INTO core.comprobantes (
     empresa_id, tipo, serie, numero, cliente_id, mascota_id, consulta_id,
     fecha_emision, moneda, tipo_cambio, estado, estado_pago,
-    documento_ref_id, motivo_nota, observaciones, created_by
+    documento_ref_id, motivo_nota, codigo_tipo_nota, observaciones, created_by
   ) VALUES (
     v_emp, 'nota_credito', v_serie, v_numero, v_ref.cliente_id, v_ref.mascota_id,
     v_ref.consulta_id, now(), v_ref.moneda, v_ref.tipo_cambio,
-    'emitido', 'pagado', v_ref.id, v_motivo, p_payload->>'observaciones', p_user_id
+    CASE WHEN COALESCE(v_electronico, false) THEN 'pendiente_envio'::core.estado_comprobante
+         ELSE 'emitido'::core.estado_comprobante END,
+    'pagado', v_ref.id, v_motivo, v_cod_nota, p_payload->>'observaciones', p_user_id
   ) RETURNING id INTO v_id;
 
   -- Sin detalle: la nota cubre lo que aún no se ha acreditado del comprobante.
@@ -635,11 +676,11 @@ BEGIN
     INSERT INTO core.comprobante_items (
       comprobante_id, tipo_item, servicio_id, producto_id, orden_servicio_id,
       insumo_id, item_ref_id, codigo, descripcion, cantidad, precio_unitario, descuento,
-      afecto_igv, subtotal, igv, total, orden
+      afecto_igv, tipo_afectacion_igv, unidad_medida, subtotal, igv, total, orden
     ) VALUES (
       v_id, v_ci.tipo_item, v_ci.servicio_id, v_ci.producto_id, v_ci.orden_servicio_id,
       v_ci.insumo_id, v_ci.id, v_ci.codigo, v_ci.descripcion, v_cant, v_ci.precio_unitario, 0,
-      v_ci.afecto_igv,
+      v_ci.afecto_igv, v_ci.tipo_afectacion_igv, v_ci.unidad_medida,
       round(v_ci.subtotal * v_cant / v_ci.cantidad, 2),
       round(v_ci.igv      * v_cant / v_ci.cantidad, 2),
       round(v_ci.total    * v_cant / v_ci.cantidad, 2),

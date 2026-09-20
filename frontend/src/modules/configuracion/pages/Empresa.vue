@@ -72,6 +72,28 @@
               <label>Dirección fiscal</label>
               <input v-model.trim="f.direccion_fiscal" type="text" />
             </div>
+            <div class="field">
+              <label>Distrito</label>
+              <input v-model.trim="f.distrito" type="text" maxlength="30" placeholder="MIRAFLORES" />
+            </div>
+            <div class="field">
+              <label>Provincia</label>
+              <input v-model.trim="f.provincia" type="text" maxlength="30" placeholder="LIMA" />
+            </div>
+            <div class="field">
+              <label>Departamento</label>
+              <input v-model.trim="f.departamento" type="text" maxlength="30" placeholder="LIMA" />
+            </div>
+            <div class="field">
+              <label>Urbanización</label>
+              <input v-model.trim="f.urbanizacion" type="text" maxlength="120" />
+            </div>
+            <div class="field" style="grid-column: 1 / -1">
+              <small class="muted">
+                Distrito, provincia y departamento van al comprobante electrónico. SUNAT los
+                limita a 30 caracteres: más largo y rechaza el documento.
+              </small>
+            </div>
             <div class="field" style="grid-column: 1 / -1">
               <label>Logo (URL)</label>
               <input v-model.trim="f.logo_url" type="text" placeholder="https://…" />
@@ -99,27 +121,64 @@
               <input v-model.trim="f.serie_nota_venta_default" type="text" placeholder="NV01" />
             </div>
             <div class="field">
+              <label>Serie de nota de crédito</label>
+              <input v-model.trim="f.serie_nota_credito_default" type="text" placeholder="BC01" />
+            </div>
+            <div class="field">
               <label>Tasa de IGV</label>
               <input v-model.number="f.igv_tasa" type="number" step="0.0001" min="0" max="1" />
               <small class="muted">0.18 equivale al 18%.</small>
             </div>
           </div>
 
-          <div class="section-title" style="margin-top: 18px">Proveedor de facturación electrónica</div>
+          <div class="section-title" style="margin-top: 18px">Facturación electrónica (SUNAT)</div>
+
+          <label class="check" style="margin-bottom: 12px">
+            <input v-model="f.emite_electronico" type="checkbox" />
+            <span>
+              Esta empresa emite electrónicamente desde el ERP
+              <small class="muted" style="display: block">
+                Si está apagado, la clínica numera y cobra aquí pero emite su talonario por
+                fuera: ningún comprobante suyo se envía a SUNAT.
+              </small>
+            </span>
+          </label>
+
           <div class="form-grid">
+            <div class="field">
+              <label>Proveedor</label>
+              <select v-model="f.pse_proveedor">
+                <option value="the_factory_hka">The Factory HKA</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>RUC emisor</label>
+              <input v-model.trim="f.pse_ruc" type="text" maxlength="11" :placeholder="f.ruc" />
+              <small class="muted">Sólo si difiere del RUC de la empresa (homologación).</small>
+            </div>
             <div class="field" style="grid-column: 1 / -1">
               <label>Endpoint del PSE/OSE</label>
-              <input v-model.trim="f.pse_endpoint" type="text" placeholder="https://api.proveedor.com" />
+              <input
+                v-model.trim="f.pse_endpoint"
+                type="text"
+                placeholder="https://demo-api.thefactoryhka.com.pe/ServiceClients.svc"
+              />
             </div>
             <div class="field">
               <label>Usuario</label>
-              <input v-model.trim="f.pse_usuario" type="text" />
+              <input v-model.trim="f.pse_usuario" type="text" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label>Contraseña</label>
+              <input
+                v-model="f.pse_password"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Déjalo vacío para no cambiarla"
+              />
+              <small class="muted">Se guarda cifrada y nunca se vuelve a mostrar.</small>
             </div>
           </div>
-          <small class="muted">
-            La contraseña del PSE se guarda cifrada y no se muestra: se reemplaza desde el
-            backend al configurar la integración.
-          </small>
         </div>
       </section>
 
@@ -262,9 +321,12 @@ const nueva = reactive({ ruc: "", razon_social: "", nombre_comercial: "", telefo
 const f = reactive({
   ruc: "", razon_social: "", nombre_comercial: "", direccion_fiscal: "", ubigeo: "",
   telefono: "", correo: "", logo_url: "",
+  distrito: "", provincia: "", departamento: "", urbanizacion: "",
   serie_factura_default: "", serie_boleta_default: "", serie_nota_venta_default: "",
+  serie_nota_credito_default: "",
   igv_tasa: 0.18, aforo_consultorios: 1, duracion_cita_min: 30,
-  pse_endpoint: "", pse_usuario: "", estado: "activa",
+  emite_electronico: false, pse_proveedor: "the_factory_hka", pse_ruc: "",
+  pse_endpoint: "", pse_usuario: "", pse_password: "", estado: "activa",
 });
 
 function hidratar(e) {
@@ -273,6 +335,10 @@ function hidratar(e) {
     if (e[k] !== undefined && e[k] !== null) f[k] = e[k];
   }
   f.igv_tasa = Number(e.igv_tasa ?? 0.18);
+  f.emite_electronico = Boolean(e.emite_electronico);
+  // La clave nunca vuelve del servidor: el campo arranca vacío y sólo se manda
+  // si el usuario escribe una nueva.
+  f.pse_password = "";
 }
 
 async function cargarEmpresa() {
@@ -298,6 +364,9 @@ async function guardar() {
       if (k === "ruc" || v === "" || v === null) continue;
       p[k] = v;
     }
+    // Apagar la emisión electrónica es un valor, no un campo vacío: el filtro
+    // de arriba descarta el string vacío, no el false.
+    p.emite_electronico = f.emite_electronico;
     await empresasApi.actualizar(empresa.value.id, p);
     mensaje.value = "Datos de la empresa actualizados.";
     await cargarEmpresa();

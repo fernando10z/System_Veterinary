@@ -48,6 +48,27 @@ CREATE TABLE IF NOT EXISTS core.empresas (
   created_by              UUID,
   updated_by              UUID
 );
+-- ---------------------------------------------------------------------------
+-- Facturación electrónica: datos que SUNAT exige del emisor y credenciales del
+-- PSE. El RUC del PSE puede diferir del operativo durante la homologación, y
+-- una empresa puede numerar y cobrar aquí pero emitir su talonario por fuera
+-- (emite_electronico = false): mandarla igual al PSE la emitiría con el RUC de
+-- otra empresa.
+-- ---------------------------------------------------------------------------
+ALTER TABLE core.empresas ADD COLUMN IF NOT EXISTS emite_electronico BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE core.empresas ADD COLUMN IF NOT EXISTS pse_proveedor  VARCHAR(40) NOT NULL DEFAULT 'the_factory_hka';
+ALTER TABLE core.empresas ADD COLUMN IF NOT EXISTS pse_ruc        VARCHAR(11);
+ALTER TABLE core.empresas ADD COLUMN IF NOT EXISTS urbanizacion   VARCHAR(120);
+ALTER TABLE core.empresas ADD COLUMN IF NOT EXISTS distrito       VARCHAR(60);
+ALTER TABLE core.empresas ADD COLUMN IF NOT EXISTS provincia      VARCHAR(60);
+ALTER TABLE core.empresas ADD COLUMN IF NOT EXISTS departamento   VARCHAR(60);
+ALTER TABLE core.empresas ADD COLUMN IF NOT EXISTS serie_nota_credito_default VARCHAR(10);
+
+COMMENT ON COLUMN core.empresas.emite_electronico IS
+  'false = la empresa registra sus comprobantes en el ERP pero los emite fuera. No se envían al PSE.';
+COMMENT ON COLUMN core.empresas.pse_ruc IS
+  'RUC con el que se emite electrónicamente. Puede diferir del operativo en homologación.';
+
 CREATE INDEX IF NOT EXISTS ix_empresas_estado     ON core.empresas (estado) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_empresas_razon_trgm ON core.empresas USING gin (razon_social gin_trgm_ops);
 

@@ -925,6 +925,24 @@ CREATE TABLE IF NOT EXISTS core.comprobantes (
   updated_by        UUID,
   CONSTRAINT uq_comprobantes_numero UNIQUE (empresa_id, tipo, serie, numero)
 );
+-- ---------------------------------------------------------------------------
+-- Trazabilidad del envío al PSE. hash_cpe/xml_url/pdf_url/cdr_url ya existían;
+-- lo que faltaba era saber QUÉ documento es para el proveedor y CUÁNDO salió,
+-- que es lo que permite reconsultar el estado y descargar el CDR después.
+-- ---------------------------------------------------------------------------
+ALTER TABLE core.comprobantes ADD COLUMN IF NOT EXISTS pse_request_id    VARCHAR(100);
+ALTER TABLE core.comprobantes ADD COLUMN IF NOT EXISTS pse_response      JSONB;
+ALTER TABLE core.comprobantes ADD COLUMN IF NOT EXISTS enviado_pse_at    TIMESTAMPTZ;
+ALTER TABLE core.comprobantes ADD COLUMN IF NOT EXISTS aceptado_sunat_at TIMESTAMPTZ;
+-- Catálogo SUNAT 09 (nota de crédito) / 10 (nota de débito).
+ALTER TABLE core.comprobantes ADD COLUMN IF NOT EXISTS codigo_tipo_nota  VARCHAR(4);
+
+COMMENT ON COLUMN core.comprobantes.pse_request_id IS
+  'Identificador del documento en el PSE: RUC-CodTipo-Serie-Correlativo.';
+
+CREATE INDEX IF NOT EXISTS ix_comprobantes_por_enviar ON core.comprobantes (empresa_id, estado)
+  WHERE deleted_at IS NULL AND estado IN ('pendiente_envio','rechazado_sunat');
+
 CREATE INDEX IF NOT EXISTS ix_comprobantes_empresa ON core.comprobantes (empresa_id, fecha_emision DESC)
   WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_comprobantes_cliente ON core.comprobantes (cliente_id, fecha_emision DESC);
@@ -954,6 +972,12 @@ CREATE TABLE IF NOT EXISTS core.comprobante_items (
 ALTER TABLE core.comprobante_items ADD COLUMN IF NOT EXISTS insumo_id UUID
   REFERENCES core.insumos_utilizados(id) ON DELETE SET NULL;
 
+-- Datos que SUNAT exige por línea: la afectación al IGV (catálogo 07) y la
+-- unidad de medida (catálogo 03). Un servicio veterinario va como ZZ; un
+-- producto, como NIU.
+ALTER TABLE core.comprobante_items ADD COLUMN IF NOT EXISTS tipo_afectacion_igv VARCHAR(4) NOT NULL DEFAULT '10';
+ALTER TABLE core.comprobante_items ADD COLUMN IF NOT EXISTS unidad_medida VARCHAR(10) NOT NULL DEFAULT 'NIU';
+
 -- El ítem del comprobante original que esta línea de nota de crédito corrige.
 -- Sin esta referencia no hay forma exacta de saber cuánto de cada ítem ya se
 -- acreditó, y se podría acreditar más de lo que se facturó.
@@ -963,6 +987,28 @@ CREATE INDEX IF NOT EXISTS ix_comprobante_items_ref ON core.comprobante_items (i
   WHERE item_ref_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS ix_comprobante_items ON core.comprobante_items (comprobante_id);
+
+-- -----------------------------------------------------------------------------
+-- comprobante_pse_log — bitácora de cada intento contra el proveedor
+--
+-- Cuando SUNAT rechaza un comprobante, el mensaje del PSE es lo único que dice
+-- por qué. Guardar request y response completos es lo que permite entenderlo
+-- días después, sin tener que reproducir el envío.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.comprobante_pse_log (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  comprobante_id UUID NOT NULL REFERENCES core.comprobantes(id) ON DELETE CASCADE,
+  intento        INT NOT NULL DEFAULT 1,
+  operacion      VARCHAR(30) NOT NULL DEFAULT 'enviar',
+  request        JSONB,
+  response       JSONB,
+  exito          BOOLEAN NOT NULL DEFAULT false,
+  mensaje        TEXT,
+  duracion_ms    INT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by     UUID
+);
+CREATE INDEX IF NOT EXISTS ix_comprobante_pse_log ON core.comprobante_pse_log (comprobante_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS core.pagos (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

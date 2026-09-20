@@ -154,6 +154,18 @@ DO $$ BEGIN
     ('borrador','emitido','enviado_sunat','aceptado_sunat','rechazado_sunat','anulado');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Estados que aparecieron con la integración al PSE:
+--   pendiente_envio  → numerado y cobrable, aún no salió hacia SUNAT
+--   observado_sunat  → SUNAT lo aceptó con observaciones (el CDR llega, pero
+--                      hay algo que corregir en la próxima emisión)
+DO $$ BEGIN
+  ALTER TYPE core.estado_comprobante ADD VALUE IF NOT EXISTS 'pendiente_envio' AFTER 'emitido';
+EXCEPTION WHEN others THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TYPE core.estado_comprobante ADD VALUE IF NOT EXISTS 'observado_sunat' AFTER 'aceptado_sunat';
+EXCEPTION WHEN others THEN NULL; END $$;
+
 DO $$ BEGIN
   CREATE TYPE core.moneda_codigo AS ENUM ('PEN','USD');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;

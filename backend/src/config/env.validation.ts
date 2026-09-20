@@ -38,6 +38,16 @@ class EnvVars {
   @IsNumberString() REDIS_PORT!: string;
   @IsOptional() @IsString() REDIS_PASSWORD?: string;
 
+  // Cifra la clave del PSE guardada por empresa. Sin ella no se puede emitir
+  // electrónicamente, pero el resto del ERP funciona: por eso no es obligatoria.
+  @IsOptional() @IsString() @MinLength(16) ENCRYPTION_KEY?: string;
+
+  // Facturación electrónica. Sin configurar, el modo sandbox simula el envío.
+  @IsOptional() @IsString() PSE_PROVIDER?: string;
+  @IsOptional() @IsString() PSE_MODE?: string;
+  @IsOptional() @IsString() PSE_ENDPOINT?: string;
+  @IsOptional() @IsNumberString() PSE_TIMEOUT_MS?: string;
+
   // SMTP opcional: sin él, el envío de recordatorios por correo queda apagado
   @IsOptional() @IsString() SMTP_HOST?: string;
   @IsOptional() @IsNumberString() SMTP_PORT?: string;

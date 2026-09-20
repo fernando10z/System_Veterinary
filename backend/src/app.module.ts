@@ -7,7 +7,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { join } from "path";
 
 import {
-  appConfig, databaseConfig, jwtConfig, storageConfig, redisConfig, mailConfig, validateEnv,
+  appConfig, databaseConfig, jwtConfig, storageConfig, redisConfig, mailConfig, validateEnv, pseConfig,
 } from "./config";
 import { DatabaseModule } from "./infrastructure/database/database.module";
 import { StorageModule } from "./infrastructure/storage/storage.module";
@@ -47,7 +47,7 @@ import { ArchivosModule } from "./modules/archivos/archivos.module";
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [join(process.cwd(), ".env")],
-      load: [appConfig, databaseConfig, jwtConfig, storageConfig, redisConfig, mailConfig],
+      load: [appConfig, databaseConfig, jwtConfig, storageConfig, redisConfig, mailConfig, pseConfig],
       validate: validateEnv,
     }),
     JwtModule.register({ global: true }),
