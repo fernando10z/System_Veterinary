@@ -1125,7 +1125,15 @@ CREATE TABLE IF NOT EXISTS core.disponibilidad (
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT ck_disponibilidad_rango CHECK (hora_fin > hora_inicio)
 );
+-- El permiso que generó este bloqueo. Sin la referencia, revertir una
+-- aprobación deja la agenda bloqueada para siempre: nadie sabe qué filas
+-- borrar.
+ALTER TABLE core.disponibilidad ADD COLUMN IF NOT EXISTS permiso_id UUID
+  REFERENCES core.permisos_laborales(id) ON DELETE CASCADE;
+
 CREATE INDEX IF NOT EXISTS ix_disponibilidad ON core.disponibilidad (empresa_id, fecha, user_id);
+CREATE INDEX IF NOT EXISTS ix_disponibilidad_permiso ON core.disponibilidad (permiso_id)
+  WHERE permiso_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS core.asistencia (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),

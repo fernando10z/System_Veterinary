@@ -35,6 +35,9 @@ la base normaliza documentos, nombres, teléfonos y correos al guardarlos
 | GET | `/citas` | Filtros: `desde` `hasta` `estado` `veterinarioId` `mascotaId` `buscar`. |
 | GET | `/citas/agenda-dia` | Conteo por estado del día. |
 | GET | `/citas/disponibilidad` | Huecos libres: `veterinarioId` `fecha` `duracion`. |
+| GET | `/citas/sala-espera` | Quién espera ahora, por gravedad. `meta` trae el resumen del turno. |
+| POST | `/citas/llegada` | Con `cita_id` marca la llegada; sin él, atención sin cita previa. |
+| GET/POST | `/citas/lista-espera` · PATCH `/citas/lista-espera/:id/resolver` | A quién llamar si se libera un cupo. |
 | POST | `/citas` · PATCH `/citas/:id/reprogramar` · PATCH `/citas/:id/estado` | |
 | GET | `/mascotas` · `/mascotas/:id` | Ficha con vacunas, tratamientos, curva de peso. |
 | GET | `/mascotas/:id/historia` | Línea de tiempo; `tipo` la filtra. |
@@ -48,6 +51,21 @@ la base normaliza documentos, nombres, teléfonos y correos al guardarlos
 | POST | `/clinico/ordenes-servicio` · `/clinico/insumos` | Lo facturable de la atención. |
 | GET | `/clinico/pendiente-facturar/:clienteId` | Alimenta la emisión de comprobantes. |
 
+## Documentos imprimibles
+
+Todos son lecturas: devuelven el documento armado —emisor, paciente,
+propietario, profesional que firma y contenido— y el cliente lo imprime.
+Emitir un documento no cambia el estado de nada.
+
+| Método | Ruta | Notas |
+|---|---|---|
+| GET | `/documentos/receta/:consultaId` | Marca aparte los medicamentos controlados. |
+| GET | `/documentos/carne-vacunacion/:mascotaId` | Vacunas y desparasitaciones; la antirrábica va destacada. |
+| GET | `/documentos/consentimiento/:cirugiaId` | Con las cláusulas que la clínica redactó. |
+| GET | `/documentos/alta-hospitalaria/:hospitalizacionId` | Evolución por turno y medicación administrada. |
+| GET | `/documentos/certificado-salud/:mascotaId` | `motivo` `destino` `veterinarioId`. Devuelve `apto` y `observaciones_previas` con lo que falta. |
+| GET | `/documentos/historia-clinica/:mascotaId` | Sólo consultas cerradas. |
+
 ## Operación y administración
 
 | Método | Ruta | Notas |
@@ -57,14 +75,23 @@ la base normaliza documentos, nombres, teléfonos y correos al guardarlos
 | GET/POST | `/compras/proveedores` · `/compras/ordenes` | |
 | POST | `/compras/ordenes/:id/recibir` | Sin cuerpo recibe todo lo pendiente. |
 | POST | `/facturacion` | Sin `items` factura todo lo pendiente del cliente. |
-| PATCH | `/facturacion/:id/anular` | Devuelve los ítems al pool de pendientes. |
+| POST | `/facturacion/notas-credito` | Sin `items` acredita el comprobante entero. `repone_stock`, `devolver_a_pendientes`. |
+| PATCH | `/facturacion/:id/anular` | Devuelve los ítems al pool de pendientes. No procede si ya salió a SUNAT o tiene cobros. |
 | GET | `/facturacion/cuentas-por-cobrar` | Aging por tramo de mora. |
+| GET | `/facturacion/sunat/pendientes` | Lo numerado que todavía no llegó a SUNAT. |
+| POST | `/facturacion/:id/sunat/enviar` · `/facturacion/sunat/enviar-pendientes` | Reintentable. |
+| GET | `/facturacion/:id/sunat/estado` | Reconsulta el CDR, que llega minutos después. |
+| GET | `/facturacion/:id/sunat/archivo/:tipo` | `XML`, `PDF` o `CDR` tal como quedaron en el PSE. |
+| PATCH | `/facturacion/:id/sunat/baja` | Comunicación de baja. |
 | POST | `/pagos` | Sin `aplicaciones` imputa a los comprobantes más antiguos. |
 | POST | `/caja/abrir` · `/caja/movimientos` · PATCH `/caja/:id/cerrar` | El cierre es el arqueo. |
 | GET | `/rrhh/equipo` · `/rrhh/asistencia` · `/rrhh/permisos` | |
 | POST | `/rrhh/asistencia/marcar` | Marca entrada o salida según el estado del día. |
 | GET | `/reportes/{ventas,clinico,inventario,ejecutivo}` | Rango `desde`/`hasta`. |
-| GET | `/dashboard` · `/dashboard/recordatorios` | |
+| GET | `/dashboard` · `/dashboard/recordatorios` | Cada recordatorio trae `whatsapp` y `mensaje_sugerido` listos. |
+| PATCH | `/dashboard/recordatorios/:id/contactar` · `/completar` | Contactar deja el registro en la bitácora sin cerrar el aviso. |
+| POST | `/dashboard/recordatorios/generar-citas` | Arma la tanda del día siguiente. Idempotente. |
+| GET/POST | `/dashboard/plantillas` | Texto con el que la clínica contacta. Variables `{{propietario}}` `{{paciente}}` `{{clinica}}` `{{fecha}}`. |
 | GET | `/auditoria` | Bitácora con diff. |
 
 ## Portal del propietario

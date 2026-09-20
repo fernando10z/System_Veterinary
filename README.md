@@ -73,6 +73,10 @@ contraseña `Mascota2026!`.
 | Auth backoffice | JWT access (15 m) + refresh (7 d, whitelist en Redis) | Permite revocar una sesión concreta sin esperar a que expire. |
 | Auth portal | JWT con `type=portal`, issuer/audience propios | Un token del portal no valida contra el guard del staff, ni al revés. |
 | Storage | MinIO con URLs prefirmadas | Radiografías y consentimientos no pasan por el backend al descargarse. |
+| Facturación electrónica | Adaptador `PseAdapter` + modo sandbox | El orquestador y los SPs no saben de The Factory HKA: cambiar de proveedor no toca la lógica de negocio, y el flujo completo se prueba sin credenciales. Ver [ADR-005](docs/decisions/005-facturacion-electronica.md). |
+| Códigos de catálogo SUNAT | Resueltos en el SP, no en el backend | La afectación al IGV o la unidad de medida de una línea es una regla de negocio, y vive donde vive el resto. |
+| Documentos impresos | Vistas del frontend con CSS de impresión | No hace falta un motor de PDF en el servidor: la hoja se arma con los datos que ya devuelve el SP y el navegador imprime. |
+| Recordatorios | Enlace `wa.me` con el texto ya redactado | Una clínica de barrio no contrata la API de WhatsApp Business. Lo que falta es el número normalizado y el mensaje, no el envío. |
 
 ### Modelo de acceso multi-empresa
 
@@ -146,18 +150,22 @@ System_VeterinaryERP/
 | Módulo | Qué resuelve |
 |---|---|
 | **Agenda** | Tablero por estado (programada → confirmada → en sala → en atención → atendida), cálculo de huecos libres por veterinario cruzando horario de la empresa, turnos y permisos aprobados. Bloquea solapamientos. |
+| **Sala de espera** | Triaje: quién está ahora en la clínica ordenado por gravedad, no por hora de llegada. Registra la atención sin cita previa. Lista de espera para avisar cuando se libera un cupo. |
 | **Pacientes** | Ficha clínica con alertas de alergias, curva de peso, carné de vacunación y línea de tiempo unificada. |
 | **Propietarios** | Cartera privada de cada empresa, con deuda, mascotas vinculadas y bitácora de contactos. |
 | **Historia clínica** | Consulta con estructura SOAP y constantes fisiológicas, cierre firmado e inmutable, cirugías con consentimiento obligatorio, hospitalización con evoluciones por turno, exámenes y documentos. |
 | **Vacunación** | Protocolos por especie que calculan el refuerzo y generan recordatorios automáticos de contacto. |
 | **Inventario** | Kardex completo, lotes con vencimiento, alertas de stock crítico y consumo clínico que descuenta stock en el acto. |
 | **Compras** | Proveedores, órdenes con recepción total o parcial que crea lotes y mueve inventario, y pagos con saldo. |
-| **Facturación** | Emite boleta/factura/nota de venta desde lo pendiente de cobrar del paciente. Valida que una factura exija RUC. Desagrega IGV. |
+| **Facturación** | Emite boleta/factura/nota de venta desde lo pendiente de cobrar del paciente. Valida que una factura exija RUC. Desagrega IGV. Nota de crédito total o parcial. |
+| **SUNAT** | Envío al PSE (The Factory HKA) con adaptador intercambiable y modo sandbox. Estado del CDR, comunicación de baja, descarga de XML/PDF/CDR y cola de lo que no llegó a SUNAT. |
+| **Documentos** | Receta, carné de vacunación, consentimiento quirúrgico, alta hospitalaria, certificado de salud e historia clínica, listos para imprimir. Comprobante en A4 y ticket de 80 mm con QR e importe en letras. |
 | **Cobranzas** | Aging por tramos de mora, cobros que se imputan a los comprobantes más antiguos si no se detalla. |
 | **Caja** | Apertura por turno, movimientos y arqueo que compara efectivo contado contra esperado. |
 | **Equipo** | Carga de trabajo, asistencia con detección de tardanza, permisos que bloquean la agenda al aprobarse, evaluaciones. |
 | **Reportes** | Ventas, producción clínica, valorización de inventario y comparativo ejecutivo entre empresas. |
-| **Portal** | El propietario ve sus mascotas, historial (sin notas internas), citas y comprobantes, y puede solicitar cita. |
+| **Portal** | El propietario ve sus mascotas, historial (sin notas internas), citas y comprobantes, y puede solicitar cita dentro del horario de atención. |
+| **Recordatorios** | Refuerzos, controles y citas con el mensaje ya redactado y el número listo para WhatsApp. Plantillas propias de cada clínica. |
 | **Auditoría** | Bitácora con diff campo a campo de cada cambio. |
 
 ---
@@ -171,12 +179,19 @@ Están en los SPs, no en la UI, así que ningún cliente puede saltárselas:
 - Solo un **veterinario colegiado** puede firmar una consulta.
 - Una **cirugía** no se cierra sin consentimiento informado firmado.
 - Una **salida de inventario** nunca deja el stock en negativo.
+- Una salida de un producto con lotes **sale del vencimiento más próximo** (FEFO) y escribe un movimiento por lote. Un **lote vencido no se dispensa**: sólo lo alcanzan merma, vencimiento y ajuste negativo.
+- Lo que **sale del almacén en una atención se cobra**: la vacuna, el antiparasitario y el insumo quedan pendientes de facturar, con el paciente derivado del acto clínico.
+- No se **recibe más de lo pedido** en una orden de compra, ni un producto con lotes sin su número de lote.
 - Una **factura** exige que el cliente tenga RUC; si no, corresponde boleta.
-- Un **comprobante aceptado por SUNAT** no se anula: corresponde nota de crédito.
+- Un **comprobante enviado a SUNAT** no se anula: corresponde nota de crédito, o la comunicación de baja dentro del plazo.
+- Una **nota de crédito** no puede acreditar más de lo facturado, ni sumando varias parciales.
+- Un **comprobante con cobros aplicados** no se anula sin anular antes los pagos.
 - Al **anular un comprobante**, sus servicios e insumos vuelven a quedar pendientes de cobro.
 - Un **paciente con historia clínica** no se elimina: se marca inactivo y la historia se conserva.
 - Marcar una mascota como **fallecida** suspende sus tratamientos, cancela sus citas futuras y apaga sus recordatorios.
 - Nadie **aprueba su propio permiso**, cambia el estado de su propia cuenta ni **se cambia el rol a sí mismo**.
+- Un **permiso aprobado bloquea la agenda** de esos días, y **revertirlo la libera**: el bloqueo sigue a la decisión en los dos sentidos.
+- El **portal no agenda fuera del horario** de atención ni acumula solicitudes sin responder.
 - Solo un **super admin** puede asignar o crear roles de alcance global. Un administrador de empresa que lo intente —sobre sí mismo o sobre un colega— recibe `403`.
 - Un **cobro en efectivo exige caja abierta**: sin ella el billete no generaría movimiento y no habría nada que cuadrar en el arqueo. Los medios que van al banco (tarjeta, transferencia, yape) no la necesitan.
 - Un rol de **alcance global** no puede estar anclado a una empresa (trigger).
@@ -215,7 +230,7 @@ tiene `EXECUTE` sobre `app.*`, sin acceso directo a las tablas).
 ### Verificar que todo sigue en pie
 
 ```bash
-bash scripts/verificar-api.sh     # 115 comprobaciones: rutas, aislamiento, escalada, normalización
+bash scripts/verificar-api.sh     # 134 comprobaciones: rutas, aislamiento, escalada, normalización
 bash scripts/flujo-clinico.sh     # flujo completo: cita → consulta → boleta → cobro → caja
 ```
 

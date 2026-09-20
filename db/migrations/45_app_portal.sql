@@ -220,6 +220,44 @@ BEGIN
       'error', internal.error_jsonb('VALIDATION_ERROR','La fecha solicitada ya pasó','fecha_hora'));
   END IF;
 
+  -- La clínica tiene que estar abierta a esa hora. Sin esto el propietario
+  -- podía pedir hora un domingo a las 3 de la mañana, y recepción descubría la
+  -- solicitud imposible al día siguiente.
+  IF EXISTS (SELECT 1 FROM core.horarios_atencion h
+              WHERE h.empresa_id = v_emp AND h.activo = true)
+     AND NOT EXISTS (
+       SELECT 1 FROM core.horarios_atencion h
+        WHERE h.empresa_id = v_emp AND h.activo = true
+          AND h.dia_semana = EXTRACT(DOW FROM (v_fecha AT TIME ZONE 'America/Lima'))::int
+          AND (v_fecha AT TIME ZONE 'America/Lima')::time >= h.hora_inicio
+          AND (v_fecha AT TIME ZONE 'America/Lima')::time <  h.hora_fin)
+  THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('BUSINESS_RULE',
+        'La clínica no atiende en ese horario. Elige otro momento.', 'fecha_hora'));
+  END IF;
+
+  -- Tope de solicitudes sin confirmar. El portal es público: sin un límite,
+  -- una cuenta puede llenar la agenda de pedidos que nadie pidió.
+  IF (SELECT count(*) FROM core.citas c
+       WHERE c.cliente_id = p_cliente_id AND c.deleted_at IS NULL
+         AND c.origen = 'portal' AND c.estado = 'programada'
+         AND c.fecha_hora >= now()) >= 5 THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('BUSINESS_RULE',
+        'Tienes varias solicitudes sin confirmar. Espera a que la clínica las responda.'));
+  END IF;
+
+  -- Una misma mascota no puede tener dos pedidos a la misma hora.
+  IF EXISTS (SELECT 1 FROM core.citas c
+              WHERE c.mascota_id = v_mascota AND c.deleted_at IS NULL
+                AND c.estado IN ('programada','confirmada')
+                AND c.fecha_hora = v_fecha) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('CONFLICT',
+        'Ya tienes una cita solicitada para ese horario', 'fecha_hora'));
+  END IF;
+
   SELECT COALESCE(
     (SELECT s.duracion_min FROM core.servicios s WHERE s.id = NULLIF(p_payload->>'servicio_id','')::uuid),
     (SELECT e.duracion_cita_min FROM core.empresas e WHERE e.id = v_emp),

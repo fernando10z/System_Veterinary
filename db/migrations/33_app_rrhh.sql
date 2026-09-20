@@ -305,20 +305,32 @@ BEGIN
       'error', internal.error_jsonb('BUSINESS_RULE','No puedes aprobar tu propia solicitud'));
   END IF;
 
+  IF v_p.estado = p_estado::core.estado_solicitud THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('BUSINESS_RULE',
+        format('La solicitud ya está en estado "%s"', p_estado)));
+  END IF;
+
   UPDATE core.permisos_laborales SET
     estado = p_estado::core.estado_solicitud,
     aprobado_por = p_user_id, aprobado_at = now(),
     comentario_aprobacion = p_comentario
   WHERE id = p_id;
 
-  -- Un permiso aprobado bloquea la agenda de esos días
+  -- El bloqueo de agenda sigue a la decisión en los dos sentidos: se pone al
+  -- aprobar y se retira si después se rechaza o se cancela. Sin lo segundo, un
+  -- permiso revertido dejaba al veterinario sin agenda para siempre.
+  DELETE FROM core.disponibilidad WHERE permiso_id = p_id;
+
   IF p_estado = 'aprobado' THEN
-    INSERT INTO core.disponibilidad (empresa_id, user_id, fecha, hora_inicio, hora_fin, tipo, nota)
+    INSERT INTO core.disponibilidad (
+      empresa_id, user_id, fecha, hora_inicio, hora_fin, tipo, nota, permiso_id)
     SELECT v_p.empresa_id, v_p.user_id, d::date,
            COALESCE(v_p.hora_inicio, '00:00'::time),
            COALESCE(v_p.hora_fin, '23:59'::time),
            CASE v_p.tipo WHEN 'vacaciones' THEN 'vacaciones' ELSE 'permiso' END::core.tipo_disponibilidad,
-           'Permiso aprobado: ' || COALESCE(v_p.motivo, v_p.tipo::text)
+           'Permiso aprobado: ' || COALESCE(v_p.motivo, v_p.tipo::text),
+           p_id
       FROM generate_series(v_p.fecha_inicio, v_p.fecha_fin, '1 day'::interval) d;
   END IF;
 
