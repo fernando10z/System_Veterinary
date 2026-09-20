@@ -34,6 +34,23 @@ export class CitasRepository {
   cambiarEstado(ctx: SpContext, id: string, estado: string, motivo?: string) {
     return this.sp.callCtx("app.sp_cita_cambiar_estado", ctx, [id, estado, motivo ?? null]);
   }
+  salaEspera(ctx: SpContext, filtros: Record<string, unknown>) {
+    return this.sp.callRaw<unknown[]>("app.fn_sala_espera", [
+      ctx.userId, ctx.empresaId, ctx.isSuperAdmin, jsonbArg(filtros),
+    ]);
+  }
+  registrarLlegada(ctx: SpContext, payload: Record<string, unknown>) {
+    return this.sp.callCtx("app.sp_cita_registrar_llegada", ctx, [jsonbArg(payload)]);
+  }
+  listaEsperaListar(ctx: SpContext, filtros: Record<string, unknown>) {
+    return this.sp.callCtx("app.fn_lista_espera_listar", ctx, [jsonbArg(filtros)]);
+  }
+  listaEsperaAnotar(ctx: SpContext, payload: Record<string, unknown>) {
+    return this.sp.callCtx("app.sp_lista_espera_anotar", ctx, [jsonbArg(payload)]);
+  }
+  listaEsperaResolver(ctx: SpContext, id: string) {
+    return this.sp.callCtx("app.sp_lista_espera_resolver", ctx, [id]);
+  }
   eliminar(ctx: SpContext, id: string) {
     return this.sp.callCtx("app.sp_cita_eliminar", ctx, [id]);
   }

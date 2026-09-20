@@ -1,10 +1,12 @@
 import {
-  Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query,
+  BadRequestException, Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query,
 } from "@nestjs/common";
 import { CitasService } from "./citas.service";
 import { CrearCitaDto } from "./dto/crear-cita.dto";
 import { ReprogramarCitaDto } from "./dto/reprogramar-cita.dto";
 import { CambiarEstadoCitaDto } from "./dto/cambiar-estado-cita.dto";
+import { RegistrarLlegadaDto } from "./dto/registrar-llegada.dto";
+import { AnotarListaEsperaDto } from "./dto/anotar-lista-espera.dto";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { JwtPayload } from "../../common/types/jwt-payload.type";
 
@@ -58,6 +60,31 @@ export class CitasController {
     };
   }
 
+  /**
+   * Quién está ahora en la clínica esperando, ordenado por gravedad y no por
+   * hora de llegada: una emergencia entra antes que un control puntual.
+   */
+  @Get("sala-espera")
+  async salaEspera(@CurrentUser() u: JwtPayload, @Query("veterinarioId") veterinarioId?: string) {
+    const f: Record<string, unknown> = {};
+    if (veterinarioId) f.veterinario_id = veterinarioId;
+    const r = await this.citas.salaEspera(u, f);
+    return { ok: true, data: r?.data ?? [], meta: r?.meta };
+  }
+
+  /** A quién llamar cuando se libera un cupo. */
+  @Get("lista-espera")
+  async listaEspera(
+    @CurrentUser() u: JwtPayload,
+    @Query("fecha") fecha?: string,
+    @Query("veterinarioId") veterinarioId?: string,
+  ) {
+    const f: Record<string, unknown> = {};
+    if (fecha) f.fecha = fecha;
+    if (veterinarioId) f.veterinario_id = veterinarioId;
+    return { ok: true, data: await this.citas.listaEsperaListar(u, f) };
+  }
+
   @Get(":id")
   async obtener(@CurrentUser() u: JwtPayload, @Param("id", ParseUUIDPipe) id: string) {
     return { ok: true, data: await this.citas.obtener(u, id) };
@@ -66,6 +93,31 @@ export class CitasController {
   @Post()
   async crear(@CurrentUser() u: JwtPayload, @Body() dto: CrearCitaDto) {
     return { ok: true, data: await this.citas.crear(u, dto) };
+  }
+
+  /**
+   * El paciente llegó. Con `cita_id` marca la llegada; sin él crea la atención
+   * sin cita previa, que es el caso que la agenda no resolvía.
+   */
+  @Post("llegada")
+  async registrarLlegada(@CurrentUser() u: JwtPayload, @Body() dto: RegistrarLlegadaDto) {
+    if (!dto.cita_id && !dto.mascota_id) {
+      throw new BadRequestException("Indica la cita que llegó o el paciente que se atiende sin cita");
+    }
+    return { ok: true, data: await this.citas.registrarLlegada(u, dto) };
+  }
+
+  @Post("lista-espera")
+  async anotarListaEspera(@CurrentUser() u: JwtPayload, @Body() dto: AnotarListaEsperaDto) {
+    return { ok: true, data: await this.citas.listaEsperaAnotar(u, dto) };
+  }
+
+  @Patch("lista-espera/:id/resolver")
+  async resolverListaEspera(
+    @CurrentUser() u: JwtPayload,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    return { ok: true, data: await this.citas.listaEsperaResolver(u, id) };
   }
 
   @Patch(":id/reprogramar")

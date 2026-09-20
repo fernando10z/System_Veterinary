@@ -4,6 +4,8 @@ import { JwtPayload } from "../../common/types/jwt-payload.type";
 import { SpContext } from "../../common/types/sp-result.type";
 import { CrearCitaDto } from "./dto/crear-cita.dto";
 import { ReprogramarCitaDto } from "./dto/reprogramar-cita.dto";
+import { RegistrarLlegadaDto } from "./dto/registrar-llegada.dto";
+import { AnotarListaEsperaDto } from "./dto/anotar-lista-espera.dto";
 
 @Injectable()
 export class CitasService {
@@ -27,6 +29,21 @@ export class CitasService {
   }
   cambiarEstado(u: JwtPayload, id: string, estado: string, motivo?: string) {
     return this.repo.cambiarEstado(this.ctx(u), id, estado, motivo);
+  }
+  salaEspera(u: JwtPayload, f: Record<string, unknown>) {
+    return this.repo.salaEspera(this.ctx(u), f);
+  }
+  registrarLlegada(u: JwtPayload, dto: RegistrarLlegadaDto) {
+    return this.repo.registrarLlegada(this.ctx(u), { ...dto });
+  }
+  listaEsperaListar(u: JwtPayload, f: Record<string, unknown>) {
+    return this.repo.listaEsperaListar(this.ctx(u), f);
+  }
+  listaEsperaAnotar(u: JwtPayload, dto: AnotarListaEsperaDto) {
+    return this.repo.listaEsperaAnotar(this.ctx(u), { ...dto });
+  }
+  listaEsperaResolver(u: JwtPayload, id: string) {
+    return this.repo.listaEsperaResolver(this.ctx(u), id);
   }
   eliminar(u: JwtPayload, id: string) { return this.repo.eliminar(this.ctx(u), id); }
 }

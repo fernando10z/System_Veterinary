@@ -381,6 +381,7 @@ DECLARE
   v_oc      RECORD;
   v_item    RECORD;
   v_recibir NUMERIC;
+  v_saldo   NUMERIC;
   v_lote    UUID;
   v_pend    INT;
 BEGIN
@@ -401,7 +402,12 @@ BEGIN
         format('La orden ya está %s', v_oc.estado)));
   END IF;
 
-  FOR v_item IN SELECT * FROM core.orden_compra_items WHERE orden_compra_id = p_id LOOP
+  FOR v_item IN
+    SELECT i.*, pr.maneja_lotes, pr.nombre AS producto_nombre
+      FROM core.orden_compra_items i
+      JOIN core.productos pr ON pr.id = i.producto_id
+     WHERE i.orden_compra_id = p_id
+  LOOP
     -- Recepción parcial: si viene detalle, se usa; si no, se recibe todo.
     v_recibir := COALESCE(
       (SELECT (e->>'cantidad')::numeric
@@ -410,6 +416,27 @@ BEGIN
       v_item.cantidad - v_item.cantidad_recibida);
 
     CONTINUE WHEN v_recibir IS NULL OR v_recibir <= 0;
+
+    -- No se puede recibir más de lo pedido: si llegó de más, corresponde otra
+    -- orden, no inflar ésta. Sin este tope, un dedo de más en la recepción
+    -- mete stock que nadie compró y descuadra la valorización.
+    v_saldo := v_item.cantidad - v_item.cantidad_recibida;
+    IF v_recibir > v_saldo THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('BUSINESS_RULE',
+          format('De "%s" quedan %s por recibir y se intentó recibir %s',
+                 v_item.producto_nombre, v_saldo, v_recibir), 'cantidad'));
+    END IF;
+
+    -- Un producto que maneja lotes sin número de lote deja el stock total y la
+    -- suma de sus lotes en desacuerdo, y el control de vencimientos deja de
+    -- servir justo en lo que importa: vacunas y medicamentos.
+    IF v_item.maneja_lotes AND COALESCE(v_item.numero_lote,'') = '' THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('VALIDATION_ERROR',
+          format('"%s" se controla por lotes: indica número de lote y vencimiento antes de recibirlo',
+                 v_item.producto_nombre), 'numero_lote'));
+    END IF;
 
     v_lote := NULL;
     IF v_item.numero_lote IS NOT NULL THEN

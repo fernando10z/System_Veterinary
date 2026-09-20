@@ -86,6 +86,9 @@ const routes = [
       // Agenda clínica
       { path: "agenda", name: "agenda",
         component: () => import("../modules/citas/pages/Agenda.vue") },
+      { path: "sala-espera", name: "sala-espera",
+        component: () => import("../modules/citas/pages/SalaEspera.vue"),
+        meta: { titulo: "Sala de espera" } },
 
       // Pacientes y propietarios
       { path: "pacientes", name: "pacientes",

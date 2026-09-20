@@ -10,7 +10,7 @@
 import {
   LayoutDashboard, CalendarClock, PawPrint, Users, Stethoscope, Syringe,
   Scissors, BedDouble, Package, Truck, Receipt, Wallet, CreditCard,
-  BarChart3, UserCog, ShieldCheck, Building2, Library, History, Clock,
+  BarChart3, UserCog, ShieldCheck, Building2, Library, History, Clock, Timer,
 } from "lucide-vue-next";
 
 export const NAV_SECTIONS = [
@@ -20,7 +20,9 @@ export const NAV_SECTIONS = [
       { to: "/dashboard", label: "Panel", icon: LayoutDashboard, requirePermission: null,
         keywords: "inicio home resumen tablero indicadores" },
       { to: "/agenda", label: "Agenda", icon: CalendarClock, requirePermission: "citas:listar",
-        keywords: "citas calendario turnos sala de espera reservas" },
+        keywords: "citas calendario turnos reservas programar" },
+      { to: "/sala-espera", label: "Sala de espera", icon: Timer, requirePermission: "citas:listar",
+        keywords: "triaje urgencias emergencia cola llegada sin cita walk in espera recepcion" },
     ],
   },
   {
