@@ -11,13 +11,30 @@ import fastifyHelmet from "@fastify/helmet";
 import { AppModule } from "./app.module";
 import { mensajesValidacionES } from "./common/validation-messages";
 import { SanearEntradaPipe } from "./common/pipes/sanear-entrada.pipe";
+import { iniciarContexto } from "./common/context/request-context";
+
+/**
+ * Cuántos saltos de proxy son de confianza. Fastify acepta un número (saltos),
+ * una lista de IPs/CIDR o false. Por defecto: ninguno.
+ */
+function resolverTrustProxy(valor?: string): boolean | number | string {
+  const v = (valor ?? "").trim();
+  if (v === "" || v === "false" || v === "0") return false;
+  if (/^\d+$/.test(v)) return Number(v);
+  return v; // IPs o CIDR separados por coma
+}
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
       logger: false,
-      trustProxy: true,
+      // `true` significaba "confía en cualquier X-Forwarded-For", incluida la
+      // que escriba el cliente. Con eso, el límite de intentos de login se
+      // saltaba cambiando una cabecera y la IP de la bitácora era la que el
+      // atacante quisiera. Ahora se declara cuántos proxies hay delante:
+      // TRUST_PROXY=1 detrás del nginx del despliegue, vacío si no hay ninguno.
+      trustProxy: resolverTrustProxy(process.env.TRUST_PROXY),
       // Radiografías y ecografías pesan: 50 MB cubre el caso real.
       bodyLimit: 50 * 1024 * 1024,
     }),
@@ -57,9 +74,34 @@ async function bootstrap() {
     },
   );
 
+  // El contexto se fija antes de que corra nada: guards, pipes y SPs quedan
+  // dentro de la misma cadena asíncrona y `registrar_auditoria` puede firmar
+  // con la IP real de quien hizo el cambio.
+  fastify.addHook("onRequest", (req: any, _reply: unknown, done: () => void) => {
+    iniciarContexto({
+      ip: req.ip ?? "",
+      userAgent: String(req.headers?.["user-agent"] ?? ""),
+      requestId: String(req.headers?.["x-request-id"] ?? ""),
+    });
+    done();
+  });
+
   await app.register(fastifyHelmet as any, {
-    contentSecurityPolicy: false,
+    // Este proceso solo devuelve JSON: nada que ejecutar, nada que enmarcar.
+    // La CSP de la SPA es otra y la pone nginx, que es quien sirve el HTML.
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        "default-src": ["'none'"],
+        "frame-ancestors": ["'none'"],
+        "base-uri": ["'none'"],
+        "form-action": ["'none'"],
+      },
+    },
     crossOriginResourcePolicy: { policy: "cross-origin" },
+    hsts: config.get<string>("COOKIE_SECURE") === "true"
+      ? { maxAge: 31536000, includeSubDomains: true }
+      : false,
   });
   await app.register(fastifyCookie as any, {
     secret: config.get<string>("COOKIE_SECRET"),
@@ -106,3 +148,4 @@ async function bootstrap() {
 }
 
 bootstrap();
+

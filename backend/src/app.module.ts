@@ -12,6 +12,8 @@ import {
 import { DatabaseModule } from "./infrastructure/database/database.module";
 import { StorageModule } from "./infrastructure/storage/storage.module";
 import { CacheModule } from "./infrastructure/cache/cache.module";
+import { RedisService } from "./infrastructure/cache/redis.service";
+import { ThrottlerRedisStorage } from "./infrastructure/cache/throttler-redis.storage";
 import { MailModule } from "./infrastructure/mail/mail.module";
 import { CryptoModule } from "./infrastructure/crypto/crypto.module";
 import { LoggerModule } from "./infrastructure/logger/logger.module";
@@ -53,9 +55,15 @@ import { DocumentosModule } from "./modules/documentos/documentos.module";
     }),
     JwtModule.register({ global: true }),
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([
-      { ttl: 60_000, limit: Number(process.env.RATE_LIMIT_MAX ?? 200) },
-    ]),
+    // El contador vive en Redis, no en la memoria del proceso: PM2 arranca en
+    // cluster y cada núcleo llevaba su propia cuenta.
+    ThrottlerModule.forRootAsync({
+      inject: [RedisService],
+      useFactory: (redis: RedisService) => ({
+        throttlers: [{ ttl: 60_000, limit: Number(process.env.RATE_LIMIT_MAX ?? 200) }],
+        storage: new ThrottlerRedisStorage(redis),
+      }),
+    }),
 
     // Infraestructura
     LoggerModule,
