@@ -20,6 +20,8 @@ docker compose -f infra/docker/docker-compose.dev.yml up -d
 
 # 2. Schema + datos de demostración
 bash db/scripts/apply-migrations.sh
+#    …o el atajo, si no quieres esperar las 34 migraciones:
+#    DB_NAME=vet_demo FORCE=1 bash db/scripts/restaurar-snapshot.sh
 
 # 3. Backend  → http://localhost:3100/api
 cd backend && npm install && cp .env.example .env && npm run start:dev
@@ -257,6 +259,10 @@ privilegios, la matriz rol × endpoint y la descarga de archivos ajenos.
 ```bash
 # Reconstruir la base de desarrollo desde cero
 ALLOW_RESET=yes bash db/scripts/reset-dev.sh
+
+# Snapshot versionado de la base (db/dumps/vet_demo.sql.gz)
+bash db/scripts/restaurar-snapshot.sh    # levantar en una máquina nueva
+bash db/scripts/exportar-snapshot.sh     # regenerarlo tras cambiar migraciones
 
 # Backup / restauración
 bash db/scripts/backup.sh

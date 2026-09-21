@@ -96,6 +96,27 @@ mayor que el de proxies reales reabre exactamente el mismo agujero.
 El contador del límite vive en Redis (`ThrottlerRedisStorage`), no en la memoria
 del proceso: PM2 arranca en cluster y cada núcleo llevaba su propia cuenta.
 
+## Snapshot versionado de la base
+
+`db/dumps/vet_demo.sql.gz` es el esquema completo, los catálogos y las dos
+empresas de demostración, comprimido en 128 KB. Sirve para levantar el ERP en
+una máquina nueva sin esperar las 34 migraciones:
+
+```bash
+DB_NAME=vet_local bash db/scripts/restaurar-snapshot.sh
+```
+
+**Las migraciones siguen siendo la fuente de verdad.** El volcado no se saca de
+la base de desarrollo de nadie: `db/scripts/exportar-snapshot.sh` construye una
+base temporal aplicando `db/migrations/` desde cero, la vuelca y la borra. Por
+eso el archivo no arrastra lo que cada quien haya probado en su máquina, y por
+eso hay que regenerarlo después de tocar una migración —la cabecera del volcado
+lleva el commit desde el que se generó, así que la diferencia se nota—.
+
+El volcado va sin propietarios ni ACLs: el script de restauración vuelve a
+aplicar `90_grants.sql` para rehacer `vet_app_user` y sus permisos. La
+contraseña del rol no viaja en el archivo; hay que fijarla después.
+
 ## Backups
 
 `pg_dump -Fc` con timestamp. En producción conviene un cron diario y copia fuera del
