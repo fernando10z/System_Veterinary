@@ -153,7 +153,7 @@ mapeado al status HTTP correcto (`NOT_FOUND`→404, `FORBIDDEN`→403, `CONFLICT
 ```
 System_VeterinaryERP/
 ├── db/
-│   ├── migrations/         28 archivos: tablas, triggers, helpers, 151 SPs, seeds
+│   ├── migrations/         37 archivos: tablas, triggers, helpers, 194 SPs, seeds
 │   └── scripts/            apply-migrations, reset-dev, backup, restore
 ├── backend/                NestJS + Fastify — 19 módulos
 │   └── src/
@@ -198,6 +198,9 @@ System_VeterinaryERP/
 | **Equipo** | Carga de trabajo, asistencia con detección de tardanza, permisos que bloquean la agenda al aprobarse, evaluaciones. |
 | **Reportes** | Ventas, producción clínica, valorización de inventario y comparativo ejecutivo entre empresas. |
 | **Portal** | El propietario ve sus mascotas, historial (sin notas internas), citas y comprobantes, y puede solicitar cita dentro del horario de atención. |
+| **Sedes** | Varios locales con una sola cartera: la agenda, los consultorios, el stock, la caja y el horario son de cada sede; los propietarios, la historia clínica, el catálogo y el personal son de la empresa. |
+| **Peluquería** | Recibir → empezar → hallazgos → terminar → entregar. Deja constancia del estado en que llegó el animal, convierte lo que ve el peluquero en historia clínica y genera los cargos al cerrar. |
+| **Planes preventivos** | Planes por tramo de vida con cupos por beneficio. La cobertura se aplica sola al generar cualquier cargo. |
 | **Recordatorios** | Refuerzos, controles y citas con el mensaje ya redactado y el número listo para WhatsApp. Plantillas propias de cada clínica. |
 | **Auditoría** | Bitácora con diff campo a campo de cada cambio. |
 
@@ -247,10 +250,20 @@ Están en los SPs, no en la UI, así que ningún cliente puede saltárselas:
   puede consultar su ficha, cambiar la contraseña y salir.
 - **Fichar y pedir vacaciones es autoservicio**: hacerlo en nombre de otro exige
   `rrhh:gestionar`.
+- **Un paciente no puede estar dos veces en peluquería a la vez**, no se entrega
+  sin cerrar el trabajo, y **no se entrega con un hallazgo urgente sin revisar**
+  salvo que alguien lo confirme — y entonces queda registrado.
+- **Un paciente tiene un solo plan activo.** Al cobrar habría que decidir cuál
+  cubre, y esa decisión no la puede tomar el sistema.
+- **Editar un plan no reinicia los contadores** de quien ya lo contrató: los
+  beneficios se actualizan en su sitio en vez de borrarse y rehacerse.
+- **Un plan con suscriptores no se borra**: se desactiva para dejar de venderlo,
+  y quien lo contrató conserva su cobertura hasta que venza.
 
-Verificado con `scripts/verificar-api.sh`: **164 comprobaciones, 0 fallos**,
+Verificado con `scripts/verificar-api.sh`: **190 comprobaciones, 0 fallos**,
 incluidos los intentos de acceso cruzado entre empresas, la escalada de
-privilegios, la matriz rol × endpoint y la descarga de archivos ajenos.
+privilegios, la matriz rol × endpoint, la descarga de archivos ajenos, el recorrido de
+peluquería y que el plan preventivo llegue de verdad a la cuenta.
 
 ---
 
@@ -284,7 +297,7 @@ tiene `EXECUTE` sobre `app.*`, sin acceso directo a las tablas).
 ### Verificar que todo sigue en pie
 
 ```bash
-bash scripts/verificar-api.sh     # 164 comprobaciones: rutas, aislamiento, roles, escalada, archivos
+bash scripts/verificar-api.sh     # 190 comprobaciones: rutas, aislamiento, roles, archivos, peluquería, planes
 bash scripts/flujo-clinico.sh     # flujo completo: cita → consulta → boleta → cobro → caja
 ```
 

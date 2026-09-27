@@ -123,6 +123,57 @@ de otra clínica responde `404`, igual que cualquier otro registro ajeno.
 La clave la arma siempre el backend con la empresa del token: el cliente elige el
 área y el nombre, nunca dónde se escribe.
 
+
+## Peluquería
+
+Un baño con corte son cuatro horas con el animal solo y la clínica respondiendo
+por él: eso es una estancia, no una cita. El recorrido es
+`recibir → iniciar → (hallazgos) → terminar → entregar`.
+
+| Método | Ruta | Notas |
+|---|---|---|
+| GET | `/peluqueria` | Tablero del día. Filtros: `desde`, `hasta`, `estado`, `sedeId`, `mascotaId`. `meta` trae el recuento por estado y lo facturable. |
+| GET | `/peluqueria/:id` | Ficha completa con servicios y hallazgos. |
+| POST | `/peluqueria` | Recepción: servicios pedidos y **estado en que llegó** (pelaje, temperamento, foto, observaciones). El precio se congela aquí. |
+| PATCH | `/peluqueria/:id/iniciar` | |
+| POST | `/peluqueria/:id/hallazgos` | Lo que ve el peluquero. Con `requiere_veterinario` notifica a los veterinarios de la sede. |
+| PATCH | `/peluqueria/hallazgos/:id/atender` | El veterinario lo da por revisado. Exige `clinico:registrar`. |
+| PATCH | `/peluqueria/:id/terminar` | Genera un cargo por servicio y escribe la sesión en la historia clínica. |
+| PATCH | `/peluqueria/:id/entregar` | Se niega si quedan hallazgos urgentes sin revisar; `omitir_aviso: true` lo fuerza y queda registrado. |
+| PATCH | `/peluqueria/:id/cancelar` | Anula los cargos no facturados. |
+
+Un paciente no puede tener dos estancias abiertas a la vez (`409`).
+
+## Planes preventivos
+
+No es `esquemas_vacunacion` —eso es el protocolo clínico—: es la cuota que paga
+el propietario. La cobertura se aplica en `internal.registrar_cargo_servicio`,
+por donde pasan todos los cargos, así que contratar un plan cambia lo que se
+cobra y no solo lo que dice la ficha.
+
+| Método | Ruta | Notas |
+|---|---|---|
+| GET | `/planes` | Catálogo con beneficios, suscritos e ingreso recurrente. Exige `planes:ver`. |
+| POST | `/planes` | Alta y edición, beneficios incluidos. Exige `planes:gestionar`. |
+| DELETE | `/planes/:id` | Baja lógica. Se niega si tiene suscripciones activas. |
+| GET | `/planes/suscripciones/listar` | Cartera. Filtros: `estado`, `planId`, `clienteId`, `porVencerDias`. |
+| POST | `/planes/suscripciones` | Suscribe una **mascota**. Valida especie, edad y que no tenga otro plan activo. Exige `planes:vender`. |
+| PATCH | `/planes/suscripciones/:id/cancelar` | |
+| GET | `/planes/mascota/:id` | Qué le queda: beneficios usados, restantes y ahorro. Devuelve `null` si no tiene plan. |
+| POST | `/planes/vencer` | Cierra las que pasaron de fecha. Idempotente. |
+
+## Sedes
+
+| Método | Ruta | Notas |
+|---|---|---|
+| GET | `/sedes` | Locales con su carga del día. |
+| POST | `/sedes` | Alta y edición. Exige `empresa:configurar`. |
+| DELETE | `/sedes/:id` | Baja lógica. Se niega en la principal, con caja abierta o con citas futuras. |
+
+`sede_id` viaja en el filtro de las lecturas que lo admiten (`/citas`,
+`/peluqueria`). En las escrituras **no se acepta del cliente salvo explícito y
+validado**: sale de la sede base del usuario, y si no la tiene, de la principal.
+
 ## Códigos de error
 
 | `code` | HTTP | Cuándo |

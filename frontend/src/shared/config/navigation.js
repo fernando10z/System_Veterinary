@@ -11,6 +11,7 @@ import {
   LayoutDashboard, CalendarClock, PawPrint, Users, Stethoscope, Syringe,
   Scissors, BedDouble, Package, Truck, Receipt, Wallet, CreditCard,
   BarChart3, UserCog, ShieldCheck, Building2, Library, History, Clock, Timer,
+  Bath, MapPin,
 } from "lucide-vue-next";
 
 export const NAV_SECTIONS = [
@@ -40,11 +41,15 @@ export const NAV_SECTIONS = [
         keywords: "internamiento jaulas evolucion hospital" },
       { to: "/vacunacion", label: "Vacunación", icon: Syringe, requirePermission: "clinico:ver",
         keywords: "vacunas refuerzos carne esquemas desparasitacion" },
+      { to: "/planes", label: "Planes preventivos", icon: ShieldCheck, requirePermission: "planes:ver",
+        keywords: "plan membresia suscripcion cachorro adulto senior preventivo cuota" },
     ],
   },
   {
     label: "Operación",
     items: [
+      { to: "/peluqueria", label: "Peluquería", icon: Bath, requirePermission: "peluqueria:ver",
+        keywords: "bano corte grooming estetica deslanado unas peluqueria" },
       { to: "/inventario", label: "Inventario", icon: Package, requirePermission: "inventario:ver",
         keywords: "stock productos medicamentos insumos almacen lotes vencimiento" },
       { to: "/compras", label: "Compras", icon: Truck, requirePermission: "compras:ver",
@@ -75,6 +80,8 @@ export const NAV_SECTIONS = [
         keywords: "permisos accesos perfiles" },
       { to: "/configuracion/catalogos", label: "Catálogos", icon: Library, requirePermission: "catalogos:gestionar",
         keywords: "especies razas servicios categorias consultorios horarios esquemas" },
+      { to: "/configuracion/sedes", label: "Sedes", icon: MapPin, requirePermission: "empresa:configurar",
+        keywords: "sede local sucursal establecimiento" },
       { to: "/configuracion/empresa", label: "Empresa", icon: Building2, requirePermission: null,
         keywords: "sede clinica ruc series facturacion datos fiscales negocio" },
       { to: "/auditoria", label: "Auditoría", icon: History, requirePermission: "auditoria:ver",
@@ -104,6 +111,7 @@ export const PERMISO_POR_RUTA = (() => {
   mapa["/pacientes/:id"] = "mascotas:listar";
   mapa["/clientes/:id"] = "clientes:listar";
   mapa["/consultas/:id"] = "clinico:ver";
+  mapa["/peluqueria/:id"] = "peluqueria:ver";
   return mapa;
 })();
 

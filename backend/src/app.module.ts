@@ -44,6 +44,9 @@ import { PortalModule } from "./modules/portal/portal.module";
 import { AuditoriaModule } from "./modules/auditoria/auditoria.module";
 import { ArchivosModule } from "./modules/archivos/archivos.module";
 import { DocumentosModule } from "./modules/documentos/documentos.module";
+import { SedesModule } from "./modules/sedes/sedes.module";
+import { PeluqueriaModule } from "./modules/peluqueria/peluqueria.module";
+import { PlanesModule } from "./modules/planes/planes.module";
 
 @Module({
   imports: [
@@ -74,7 +77,7 @@ import { DocumentosModule } from "./modules/documentos/documentos.module";
     CryptoModule,
     HealthModule,
 
-    // Negocio — 18 módulos, espejo del dominio de la clínica
+    // Negocio — 21 módulos, espejo del dominio de la clínica
     AuthModule,
     UsersModule,
     RolesModule,
@@ -95,6 +98,9 @@ import { DocumentosModule } from "./modules/documentos/documentos.module";
     AuditoriaModule,
     ArchivosModule,
     DocumentosModule,
+    SedesModule,
+    PeluqueriaModule,
+    PlanesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

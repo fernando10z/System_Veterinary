@@ -339,6 +339,104 @@ c=$(curl -s -o /tmp/vbody -w '%{http_code}' -X POST "$API/archivos" \
 check "subida de HTML rechazada" 400 "$c"
 
 echo
+
+echo "═══ 9. Sedes: lo que comparten los locales y lo que no ═══"
+T_PEL=$(login recepcion@vetpatitas.pe)   # recepción también opera peluquería
+matriz "$T_E1"   "admin lista las sedes"              GET /sedes 200
+matriz "$T_RECEP" "recepción NO crea sedes"           POST /sedes 403 '{"nombre":"Pirata"}'
+get "$T_E1" /sedes >/dev/null
+SEDE_PRIN=$(python3 <<'PYX'
+import json
+print(next(s["id"] for s in json.load(open("/tmp/vbody"))["data"] if s["es_principal"]))
+PYX
+)
+c=$(req "$T_E1" "/sedes/$SEDE_PRIN" DELETE); check "la sede principal no se borra" 422 "$c"
+c=$(req "$T_E2" "/sedes/$SEDE_PRIN" DELETE); check "la otra empresa no ve esa sede" 404 "$c"
+# El código de la sede sale del contador: la segunda no puede chocar con la primera.
+c=$(req "$T_E1" /sedes POST "{\"nombre\":\"Local de prueba $N-$(date +%H%M%S)\"}")
+check "se puede abrir un segundo local" 201 "$c"
+NUEVA_SEDE=$(jid)
+[[ -n "$NUEVA_SEDE" ]] && { c=$(req "$T_E1" "/sedes/$NUEVA_SEDE" DELETE); check "un local sin movimiento se da de baja" 200 "$c"; }
+
+echo "═══ 10. Peluquería: recibir, encontrar, cobrar, entregar ═══"
+get "$T_E1" /mascotas >/dev/null; MASC_P=$(jid)
+get "$T_E1" /catalogos/servicios >/dev/null
+SRV_G=$(python3 <<'PYX'
+import json
+d = json.load(open("/tmp/vbody"))["data"]
+g = [s for s in d if s.get("tipo") == "grooming"]
+print(g[0]["id"] if g else "")
+PYX
+)
+c=$(req "$T_ALM" /peluqueria POST "{\"mascota_id\":\"$MASC_P\",\"servicios\":[{\"servicio_id\":\"$SRV_G\"}]}")
+check "almacén NO recibe en peluquería" 403 "$c"
+c=$(req "$T_E1" /peluqueria POST "{\"mascota_id\":\"$MASC_P\",\"servicios\":[{\"servicio_id\":\"$SRV_G\"}],\"condicion_pelaje\":\"nudos_leves\"}")
+check "recibe el paciente" 201 "$c"
+ORD_P=$(jid)
+if [[ -n "$ORD_P" ]]; then
+  c=$(req "$T_E1" /peluqueria POST "{\"mascota_id\":\"$MASC_P\",\"servicios\":[{\"servicio_id\":\"$SRV_G\"}]}")
+  check "el mismo paciente no entra dos veces a la vez" 409 "$c"
+  c=$(req "$T_E1" "/peluqueria/$ORD_P/entregar" PATCH '{}')
+  check "no se entrega sin terminar" 422 "$c"
+  c=$(req "$T_E1" "/peluqueria/$ORD_P/hallazgos" POST '{"hallazgo":"pulgas","zona":"lomo","requiere_veterinario":true}')
+  check "se registra un hallazgo" 201 "$c"
+  c=$(req "$T_E1" "/peluqueria/$ORD_P/terminar" PATCH '{}')
+  check "se cierra el trabajo y se cobra" 200 "$c"
+  c=$(req "$T_E1" "/peluqueria/$ORD_P/entregar" PATCH '{"entregado_a":"Prueba"}')
+  check "no se entrega con un hallazgo urgente sin ver" 422 "$c"
+  c=$(req "$T_E1" "/peluqueria/$ORD_P/entregar" PATCH '{"entregado_a":"Prueba","omitir_aviso":true}')
+  check "se puede entregar avisando al propietario" 200 "$c"
+  c=$(get "$T_VET2" "/peluqueria/$ORD_P"); check "la otra empresa no ve esa orden" 404 "$c"
+  # El trabajo hecho tiene que estar en la cuenta del cliente.
+  COBRABLE=$(docker exec veterp_postgres_dev psql -U postgres -d vet_demo -Atc \
+    "SELECT count(*) FROM core.ordenes_servicio WHERE origen_tabla='peluqueria_items' AND facturado=false" 2>/dev/null)
+  if [[ "${COBRABLE:-0}" -gt 0 ]]; then ok=$((ok+1)); else fail=$((fail+1)); FALLOS+=("la peluquería no dejó nada que cobrar"); fi
+fi
+
+echo "═══ 11. Planes preventivos: la cobertura llega a la cuenta ═══"
+matriz "$T_RECEP" "recepción ve los planes"           GET /planes 200
+matriz "$T_ALM"   "almacén NO ve los planes"          GET /planes 403
+matriz "$T_RECEP" "recepción NO diseña planes"        POST /planes 403 '{"nombre":"Plan pirata"}'
+c=$(req "$T_E1" /planes POST '{"nombre":"Plan de prueba","precio":10,"vigencia_meses":1,"descuento_general_pct":50}')
+check "admin crea un plan" 201 "$c"
+PLAN_T=$(jid)
+# Un paciente sin plan: la regla "uno activo por paciente" impide reutilizar el
+# de la sección anterior, y eso es justo lo que se quiere que impida.
+MASC_L=$(docker exec veterp_postgres_dev psql -U postgres -d vet_demo -Atc \
+  "SELECT m.id FROM core.mascotas m
+    WHERE m.deleted_at IS NULL AND m.estado <> 'fallecido'
+      AND m.empresa_id = (SELECT id FROM core.empresas WHERE ruc = '20601234567')
+      AND NOT EXISTS (SELECT 1 FROM core.suscripciones s
+                       WHERE s.mascota_id = m.id AND s.estado = 'activa')
+    LIMIT 1" 2>/dev/null | tr -d '[:space:]')
+if [[ -n "$PLAN_T" && -n "$MASC_L" ]]; then
+  MASC_P="$MASC_L"
+  c=$(req "$T_E1" /planes/suscripciones POST "{\"plan_id\":\"$PLAN_T\",\"mascota_id\":\"$MASC_P\"}")
+  check "se suscribe al paciente" 201 "$c"
+  SUS_T=$(jid)
+  c=$(req "$T_E1" /planes/suscripciones POST "{\"plan_id\":\"$PLAN_T\",\"mascota_id\":\"$MASC_P\"}")
+  check "un paciente no tiene dos planes a la vez" 409 "$c"
+  c=$(req "$T_E1" "/planes/$PLAN_T" DELETE)
+  check "un plan con suscriptores no se borra" 422 "$c"
+  # 50% de descuento general: el cargo tiene que salir a mitad de precio.
+  SRV_C=$(docker exec veterp_postgres_dev psql -U postgres -d vet_demo -Atc \
+    "SELECT id FROM core.servicios
+      WHERE tipo = 'consulta' AND precio > 0 AND deleted_at IS NULL
+        AND empresa_id = (SELECT id FROM core.empresas WHERE ruc = '20601234567')
+      ORDER BY codigo LIMIT 1" 2>/dev/null | tr -d '[:space:]')
+  req "$T_E1" /clinico/ordenes-servicio POST \
+    "{\"mascota_id\":\"$MASC_P\",\"servicio_id\":\"$SRV_C\",\"descripcion\":\"Verificacion de plan\"}" >/dev/null
+  DESC=$(docker exec veterp_postgres_dev psql -U postgres -d vet_demo -Atc \
+    "SELECT (descuento > 0)::text FROM core.ordenes_servicio WHERE descripcion LIKE 'Verificacion de plan%' ORDER BY created_at DESC LIMIT 1" 2>/dev/null)
+  check "el plan descuenta en el cargo" true "${DESC:-sin-dato}"
+  [[ -n "$SUS_T" ]] && { c=$(req "$T_E1" "/planes/suscripciones/$SUS_T/cancelar" PATCH '{"motivo":"fin de la prueba"}')
+                         check "se cancela la suscripción" 200 "$c"; }
+  c=$(req "$T_E1" "/planes/$PLAN_T" DELETE); check "ya se puede retirar el plan" 200 "$c"
+fi
+docker exec veterp_postgres_dev psql -U postgres -d vet_demo -qc \
+  "DELETE FROM core.ordenes_servicio WHERE descripcion LIKE 'Verificacion de plan%'" >/dev/null 2>&1
+
+echo
 echo "═══════════════════════════════════════"
 echo "  OK: $ok    FALLOS: $fail"
 for f in "${FALLOS[@]}"; do echo "  ✗ $f"; done
