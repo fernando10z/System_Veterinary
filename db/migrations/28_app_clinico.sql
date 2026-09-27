@@ -1377,21 +1377,37 @@ BEGIN
       'error', internal.error_jsonb('NOT_FOUND','Servicio no encontrado','servicio_id'));
   END IF;
 
-  INSERT INTO core.ordenes_servicio (
-    empresa_id, codigo, mascota_id, cliente_id, servicio_id, veterinario_id,
-    cita_id, consulta_id, cantidad, precio_unitario, descuento, total,
-    descripcion, estado, created_by
-  ) VALUES (
-    v_emp, internal.siguiente_numero(v_emp, 'OS', 6), v_mascota, v_cliente,
-    (p_payload->>'servicio_id')::uuid,
-    COALESCE(NULLIF(p_payload->>'veterinario_id','')::uuid, p_user_id),
-    NULLIF(p_payload->>'cita_id','')::uuid,
-    NULLIF(p_payload->>'consulta_id','')::uuid,
-    v_cant, v_precio, v_desc, round(v_cant * v_precio - v_desc, 2),
-    p_payload->>'descripcion',
-    COALESCE((p_payload->>'estado')::core.estado_orden_servicio, 'completado'),
-    p_user_id
-  ) RETURNING id INTO v_id;
+  -- Delega en la misma puerta por la que pasan los cargos automáticos: así un
+  -- cargo añadido a mano desde la pantalla también respeta el plan preventivo
+  -- del paciente. Si no, la consulta que el sistema cobra sola saldría en cero
+  -- y la que teclea recepción se cobraría entera, y nadie entendería por qué.
+  v_id := internal.registrar_cargo_servicio(
+    v_emp, (p_payload->>'servicio_id')::uuid, v_mascota, p_user_id, v_cant,
+    jsonb_build_object(
+      'veterinario_id',  NULLIF(p_payload->>'veterinario_id',''),
+      'cita_id',         NULLIF(p_payload->>'cita_id',''),
+      'consulta_id',     NULLIF(p_payload->>'consulta_id',''),
+      'precio_unitario', v_precio,
+      'descripcion',     p_payload->>'descripcion'));
+
+  IF v_id IS NULL THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('BUSINESS_RULE','No se pudo registrar el cargo'));
+  END IF;
+
+  -- Descuento pactado en el mostrador, sobre lo que haya quedado tras el plan.
+  IF v_desc > 0 THEN
+    UPDATE core.ordenes_servicio
+       SET descuento = descuento + v_desc,
+           total = GREATEST(total - v_desc, 0)
+     WHERE id = v_id;
+  END IF;
+
+  IF p_payload ? 'estado' THEN
+    UPDATE core.ordenes_servicio
+       SET estado = (p_payload->>'estado')::core.estado_orden_servicio
+     WHERE id = v_id;
+  END IF;
 
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', v_id));
 

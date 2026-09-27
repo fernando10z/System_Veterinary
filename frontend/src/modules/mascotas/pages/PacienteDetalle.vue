@@ -88,6 +88,36 @@
             </div>
           </section>
 
+          <!-- El plan tiene que verse donde se decide qué se le hace al
+               animal, no en una pantalla aparte: si el veterinario no sabe que
+               la desparasitación está incluida, la pospone y el plan no sirve. -->
+          <section v-if="plan" class="module-panel plan-panel"
+                   :style="{ '--acento': plan.color || 'var(--line-strong)' }">
+            <header class="module-panel-head">
+              <h2><span class="head-icon"><ShieldCheck :size="14" /></span> {{ plan.plan }}</h2>
+              <span :class="['dias-plan', plan.dias_restantes <= 30 ? 'cerca' : '']">
+                {{ plan.dias_restantes }} días
+              </span>
+            </header>
+            <div class="module-panel-body">
+              <ul class="plan-beneficios">
+                <li v-for="b in plan.beneficios" :key="b.beneficio_id"
+                    :class="{ agotado: b.restantes === 0 }">
+                  <span class="nom">{{ b.servicio }}</span>
+                  <span v-if="b.incluidas" class="cupo">
+                    {{ b.restantes }} de {{ b.incluidas }}
+                  </span>
+                  <span v-else class="cupo">−{{ b.descuento_pct }}%</span>
+                </li>
+              </ul>
+              <p v-if="plan.descuento_general_pct > 0" class="plan-pie">
+                {{ plan.descuento_general_pct }}% en todo lo demás · ahorrado
+                {{ fmtSoles(plan.ahorrado) }}
+              </p>
+              <p v-else class="plan-pie">Ahorrado hasta hoy: {{ fmtSoles(plan.ahorrado) }}</p>
+            </div>
+          </section>
+
           <section class="module-panel">
             <header class="module-panel-head">
               <h2><span class="head-icon"><User :size="14" /></span> Propietario</h2>
@@ -291,15 +321,17 @@ import { useRoute, useRouter } from "vue-router";
 import {
   Loader2, ArrowLeft, Pencil, Stethoscope, AlertTriangle, User, TrendingUp,
   ClipboardList, Syringe, Pill, Plus, Filter, BedDouble, Printer, ChevronDown, FileCheck,
+  ShieldCheck,
 } from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import PacienteModal from "../components/PacienteModal.vue";
 import VacunaModal from "../../clinico/components/VacunaModal.vue";
 import ConsultaModal from "../../clinico/components/ConsultaModal.vue";
 import { mascotasApi } from "../api/mascotas.api.js";
+import { planesApi } from "../../planes/api/planes.api.js";
 import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
-import { fmtDate } from "../../../shared/components/ui/format.js";
+import { fmtDate, fmtSoles } from "../../../shared/components/ui/format.js";
 import { abrirDocumento } from "../../../shared/print/abrir-documento.js";
 import { fmtFechaHora, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
 
@@ -310,6 +342,7 @@ const puedeEditar = computed(() => hasPermission("mascotas:editar"));
 const puedeRegistrar = computed(() => hasPermission("clinico:registrar"));
 
 const p = ref(null);
+const plan = ref(null);
 const historia = ref([]);
 const especies = ref([]);
 const cargando = ref(true);
@@ -351,10 +384,27 @@ async function cargarHistoria() {
   historia.value = h.data ?? [];
 }
 
+/**
+ * El plan es opcional y quien no lo tenga contratado no debe ver un error: si
+ * la clínica no vende planes, este rol no tiene `planes:ver` y la llamada
+ * responde 403. Se traga en silencio y la ficha se dibuja igual.
+ */
+async function cargarPlan() {
+  try {
+    plan.value = (await planesApi.estadoMascota(route.params.id)).data ?? null;
+  } catch {
+    plan.value = null;
+  }
+}
+
 async function cargar() {
   cargando.value = true;
   try {
-    const [ficha] = await Promise.all([mascotasApi.obtener(route.params.id), cargarHistoria()]);
+    const [ficha] = await Promise.all([
+      mascotasApi.obtener(route.params.id),
+      cargarHistoria(),
+      cargarPlan(),
+    ]);
     p.value = ficha.data;
   } finally {
     cargando.value = false;
@@ -385,6 +435,19 @@ watch(() => route.params.id, cargar);
 </script>
 
 <style scoped>
+.plan-panel { border-top: 3px solid var(--acento) }
+.plan-panel .module-panel-head { display: flex; align-items: center; justify-content: space-between }
+.dias-plan { font-size: 11px; color: var(--ink-3) }
+.dias-plan.cerca { color: #9a5b06; font-weight: 600 }
+.plan-beneficios { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px }
+.plan-beneficios li { display: flex; gap: 8px; font-size: 12.5px; color: var(--ink-2) }
+.plan-beneficios li .nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.plan-beneficios li .cupo { color: var(--ink-3); white-space: nowrap }
+.plan-beneficios li.agotado { opacity: .5 }
+.plan-beneficios li.agotado .cupo { text-decoration: line-through }
+.plan-pie { font-size: 11.5px; color: var(--ink-3); margin: 8px 0 0; padding-top: 7px;
+            border-top: 1px dashed var(--line) }
+
 .ficha-grid { display: grid; grid-template-columns: 320px 1fr; gap: var(--gap-paneles); align-items: start; }
 @media (max-width: 1000px) { .ficha-grid { grid-template-columns: 1fr; } }
 .col-izq, .col-der { display: flex; flex-direction: column; gap: 16px; }
