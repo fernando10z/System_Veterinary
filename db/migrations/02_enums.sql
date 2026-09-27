@@ -227,3 +227,40 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   CREATE TYPE core.canal_notificacion AS ENUM ('sistema','correo','whatsapp','sms');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ---------------------------------------------------------------------------
+-- Peluquería
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+  CREATE TYPE core.estado_peluqueria AS ENUM
+    ('recibido','en_proceso','terminado','entregado','cancelado');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Lo que el peluquero encuentra al bañar y cepillar. No es un diagnóstico: es
+-- un aviso de que alguien con bata debería mirar al animal.
+DO $$ BEGIN
+  CREATE TYPE core.hallazgo_peluqueria AS ENUM
+    ('pulgas','garrapatas','nudos_severos','heridas','otitis','mal_olor_oidos',
+     'problemas_piel','bultos','unias_encarnadas','sarro','secrecion_ocular',
+     'delgadez','agresividad','otro');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ---------------------------------------------------------------------------
+-- Planes preventivos
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+  CREATE TYPE core.periodicidad_plan AS ENUM ('mensual','trimestral','semestral','anual');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE core.estado_suscripcion AS ENUM ('activa','vencida','cancelada','suspendida');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE core.tipo_beneficio_plan AS ENUM
+    ('servicio_incluido','descuento_servicio','descuento_producto');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- La peluquería entra en la historia clínica: un hallazgo del peluquero es
+-- parte de lo que le pasó al animal ese día.
+ALTER TYPE core.tipo_evento_clinico ADD VALUE IF NOT EXISTS 'peluqueria';

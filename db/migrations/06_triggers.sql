@@ -28,7 +28,7 @@ DECLARE
     'cirugias','hospitalizaciones','notas_medicas','ordenes_servicio','almacenes','productos',
     'lotes','stock','proveedores','proveedor_contactos','ordenes_compra','comprobantes',
     'cajas','contratos_personal','disponibilidad','asistencia','permisos_laborales',
-    'plantillas_mensaje'
+    'plantillas_mensaje','sedes','peluqueria_ordenes','planes','suscripciones'
   ];
 BEGIN
   FOREACH t IN ARRAY tablas LOOP
@@ -270,3 +270,46 @@ DROP TRIGGER IF EXISTS tg_comprobante_recalcular ON core.comprobante_items;
 CREATE TRIGGER tg_comprobante_recalcular
   AFTER INSERT OR UPDATE OR DELETE ON core.comprobante_items
   FOR EACH ROW EXECUTE FUNCTION core.trg_comprobante_recalcular();
+
+-- -----------------------------------------------------------------------------
+-- trg_sede_por_defecto — nadie tiene que acordarse de la sede
+--
+-- Una clínica de un solo local no debería enterarse de que las sedes existen.
+-- El mostrador crea una cita sin decir dónde, y la fila queda colgada de la
+-- sede principal. En una clínica de varios locales, el SP sí manda la sede y
+-- esto no toca nada.
+--
+-- Va en un trigger y no en cada SP porque son nueve tablas y tres módulos: el
+-- día que se olvide en uno, los informes por local empiezan a mentir en vez de
+-- fallar, que es la peor forma de romperse.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION core.trg_sede_por_defecto()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.sede_id IS NULL AND NEW.empresa_id IS NOT NULL THEN
+    NEW.sede_id := internal.sede_por_defecto(NEW.empresa_id);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DO $$
+DECLARE
+  t TEXT;
+  tablas TEXT[] := ARRAY[
+    'consultorios','almacenes','horarios_atencion','citas','cajas',
+    'consultas','hospitalizaciones','comprobantes','peluqueria_ordenes'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tablas LOOP
+    EXECUTE format(
+      'DROP TRIGGER IF EXISTS tg_%1$s_sede ON core.%1$s;
+       CREATE TRIGGER tg_%1$s_sede BEFORE INSERT ON core.%1$s
+       FOR EACH ROW EXECUTE FUNCTION core.trg_sede_por_defecto();', t);
+  END LOOP;
+END $$;
+
+-- `users` queda fuera a propósito: un usuario de alcance global no pertenece a
+-- ninguna sede, y el super admin no tiene empresa de la que sacarla.

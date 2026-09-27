@@ -48,6 +48,7 @@ BEGIN
     AND (p_filtros->>'veterinario_id' IS NULL OR c.veterinario_id = (p_filtros->>'veterinario_id')::uuid)
     AND (p_filtros->>'mascota_id'     IS NULL OR c.mascota_id = (p_filtros->>'mascota_id')::uuid)
     AND (p_filtros->>'cliente_id'     IS NULL OR c.cliente_id = (p_filtros->>'cliente_id')::uuid)
+    AND (p_filtros->>'sede_id'        IS NULL OR c.sede_id = (p_filtros->>'sede_id')::uuid)
     AND (v_buscar IS NULL OR v_buscar = '' OR
          internal.normalizar(m.nombre) LIKE '%' || v_buscar || '%' OR
          internal.normalizar(cl.nombres || ' ' || COALESCE(cl.apellido_paterno,'')) LIKE '%' || v_buscar || '%');
@@ -90,8 +91,10 @@ BEGIN
       AND c.fecha_hora >= v_desde AND c.fecha_hora < v_hasta
       AND (p_filtros->>'estado'         IS NULL OR c.estado::text = p_filtros->>'estado')
       AND (p_filtros->>'veterinario_id' IS NULL OR c.veterinario_id = (p_filtros->>'veterinario_id')::uuid)
+      AND (p_filtros->>'sede_id'        IS NULL OR c.sede_id = (p_filtros->>'sede_id')::uuid)
       AND (p_filtros->>'mascota_id'     IS NULL OR c.mascota_id = (p_filtros->>'mascota_id')::uuid)
       AND (p_filtros->>'cliente_id'     IS NULL OR c.cliente_id = (p_filtros->>'cliente_id')::uuid)
+    AND (p_filtros->>'sede_id'        IS NULL OR c.sede_id = (p_filtros->>'sede_id')::uuid)
       AND (v_buscar IS NULL OR v_buscar = '' OR
            internal.normalizar(m.nombre) LIKE '%' || v_buscar || '%' OR
            internal.normalizar(cl.nombres || ' ' || COALESCE(cl.apellido_paterno,'')) LIKE '%' || v_buscar || '%')
@@ -296,11 +299,12 @@ BEGIN
   END IF;
 
   INSERT INTO core.citas (
-    empresa_id, codigo, cliente_id, mascota_id, veterinario_id, servicio_id,
+    empresa_id, sede_id, codigo, cliente_id, mascota_id, veterinario_id, servicio_id,
     consultorio_id, fecha_hora, duracion_min, motivo, prioridad, origen,
     estado, observaciones, created_by
   ) VALUES (
     v_emp,
+    internal.sede_efectiva(p_user_id, v_emp, NULLIF(p_payload->>'sede_id','')::uuid),
     internal.siguiente_numero(v_emp, 'CIT', 6),
     v_cliente,
     (p_payload->>'mascota_id')::uuid,

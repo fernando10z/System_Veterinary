@@ -64,7 +64,15 @@ INSERT INTO core.permisos (codigo, modulo, accion, descripcion) VALUES
   ('empresa:configurar',   'empresas',    'configurar', 'Configurar los datos y series de su empresa'),
   -- Cambiar a mano el estado de un comprobante ante SUNAT (cargar el CDR, marcar
   -- aceptado) decide lo que la clínica declara: no es cosa de mostrador.
-  ('facturacion:sunat',    'facturacion', 'sunat',      'Cargar o corregir la respuesta de SUNAT')
+  ('facturacion:sunat',    'facturacion', 'sunat',      'Cargar o corregir la respuesta de SUNAT'),
+  -- Peluquería: recibir y entregar es mostrador; ver la ficha lo necesita
+  -- también el veterinario, que es quien atiende los hallazgos.
+  ('peluqueria:ver',       'peluqueria',  'ver',        'Ver el tablero de peluquería'),
+  ('peluqueria:operar',    'peluqueria',  'operar',     'Recibir, trabajar y entregar en peluquería'),
+  -- Planes preventivos: diseñarlos es de gerencia, venderlos es de mostrador.
+  ('planes:ver',           'planes',      'ver',        'Ver planes y suscripciones'),
+  ('planes:gestionar',     'planes',      'gestionar',  'Crear y editar planes preventivos'),
+  ('planes:vender',        'planes',      'vender',     'Suscribir pacientes a un plan')
 ON CONFLICT (codigo) DO UPDATE
   SET modulo = EXCLUDED.modulo, accion = EXCLUDED.accion, descripcion = EXCLUDED.descripcion;
 
@@ -78,7 +86,8 @@ INSERT INTO core.roles (codigo, nombre, descripcion, scope, is_sistema) VALUES
   ('veterinario',  'Veterinario',         'Atiende pacientes y firma historia clínica',       'empresa',           true),
   ('recepcion',    'Recepción',           'Agenda, clientes y cobros de mostrador',           'empresa',           true),
   ('almacen',      'Almacén',             'Inventario y compras',                            'empresa',           true),
-  ('contador',     'Contabilidad',        'Facturación, cobranzas y reportes',                'empresa',           true)
+  ('contador',     'Contabilidad',        'Facturación, cobranzas y reportes',                'empresa',           true),
+  ('peluquero',    'Peluquería',          'Baño, corte y entrega; sin acceso clínico ni a caja','empresa',          true)
 ON CONFLICT (codigo) DO UPDATE
   SET nombre = EXCLUDED.nombre, descripcion = EXCLUDED.descripcion, scope = EXCLUDED.scope;
 
@@ -93,7 +102,7 @@ WHERE r.codigo = 'gerente'
   AND p.codigo IN ('dashboard:ver','clientes:listar','mascotas:listar','citas:listar',
                    'clinico:ver','inventario:ver','compras:ver','facturacion:ver',
                    'pagos:ver','caja:ver','rrhh:ver','reportes:ver','reportes:ejecutivo',
-                   'auditoria:ver');
+                   'auditoria:ver','peluqueria:ver','planes:ver');
 
 -- Administrador de empresa: todo dentro de su empresa.
 DELETE FROM core.rol_permisos WHERE rol_id = (SELECT id FROM core.roles WHERE codigo = 'admin_empresa');
@@ -110,7 +119,8 @@ WHERE r.codigo = 'veterinario'
                    'mascotas:listar','mascotas:crear','mascotas:editar',
                    'citas:listar','citas:crear','citas:editar',
                    'clinico:ver','clinico:registrar',
-                   'inventario:ver','inventario:mover','reportes:ver','rrhh:ver');
+                   'inventario:ver','inventario:mover','reportes:ver','rrhh:ver',
+                   'peluqueria:ver','planes:ver');
 
 -- Recepción: la puerta de entrada — agenda, clientes y cobro de mostrador.
 DELETE FROM core.rol_permisos WHERE rol_id = (SELECT id FROM core.roles WHERE codigo = 'recepcion');
@@ -121,7 +131,8 @@ WHERE r.codigo = 'recepcion'
                    'mascotas:listar','mascotas:crear','mascotas:editar',
                    'citas:listar','citas:crear','citas:editar','citas:eliminar',
                    'clinico:ver','facturacion:ver','facturacion:emitir',
-                   'pagos:ver','pagos:registrar','caja:operar','caja:ver','inventario:ver');
+                   'pagos:ver','pagos:registrar','caja:operar','caja:ver','inventario:ver',
+                   'peluqueria:ver','peluqueria:operar','planes:ver','planes:vender');
 
 -- Almacén: inventario y compras.
 DELETE FROM core.rol_permisos WHERE rol_id = (SELECT id FROM core.roles WHERE codigo = 'almacen');
@@ -139,7 +150,16 @@ WHERE r.codigo = 'contador'
   AND p.codigo IN ('dashboard:ver','clientes:listar','facturacion:ver','facturacion:emitir',
                    'facturacion:anular','facturacion:sunat','pagos:ver','pagos:registrar',
                    'pagos:anular','caja:ver','compras:ver','compras:pagar','inventario:ver',
-                   'reportes:ver','reportes:ejecutivo','auditoria:ver');
+                   'reportes:ver','reportes:ejecutivo','auditoria:ver','planes:ver');
+
+-- Peluquería: su tablero, la agenda y la ficha del paciente para saber a qué
+-- se enfrenta. Nada de historia clínica, nada de dinero.
+DELETE FROM core.rol_permisos WHERE rol_id = (SELECT id FROM core.roles WHERE codigo = 'peluquero');
+INSERT INTO core.rol_permisos (rol_id, permiso_id)
+SELECT r.id, p.id FROM core.roles r, core.permisos p
+WHERE r.codigo = 'peluquero'
+  AND p.codigo IN ('dashboard:ver','clientes:listar','mascotas:listar','citas:listar',
+                   'peluqueria:ver','peluqueria:operar','inventario:ver');
 
 -- =============================================================================
 -- 3. MAESTROS: especializaciones, especies, razas
@@ -227,6 +247,8 @@ DECLARE
   v_almacen_u  UUID;
   v_almacen    UUID;
   v_cat_serv   UUID;
+  v_cat_est    UUID;
+  v_esp_can    UUID;
   v_cat_med    UUID;
   v_cat_alim   UUID;
   v_cat_prov   UUID;
@@ -278,12 +300,12 @@ BEGIN
     (v_emp, 'Quirófano',     'quirofano'),
     (v_emp, 'Hospitalización','hospitalizacion'),
     (v_emp, 'Sala de grooming','grooming')
-  ON CONFLICT (empresa_id, nombre) DO NOTHING;
+  ON CONFLICT DO NOTHING;
 
   INSERT INTO core.consultorios (empresa_id, nombre, tipo) VALUES
     (v_emp2, 'Consultorio 1', 'consulta'),
     (v_emp2, 'Consultorio 2', 'consulta')
-  ON CONFLICT (empresa_id, nombre) DO NOTHING;
+  ON CONFLICT DO NOTHING;
 
   -- ---- Horario de atención (lun-sáb) ---------------------------------------
   DELETE FROM core.horarios_atencion WHERE empresa_id = v_emp;
@@ -308,6 +330,8 @@ BEGIN
   ON CONFLICT (empresa_id, ambito, codigo) DO NOTHING;
 
   SELECT id INTO v_cat_serv FROM core.categorias WHERE empresa_id = v_emp AND codigo = 'CONSULTAS';
+  SELECT id INTO v_cat_est  FROM core.categorias WHERE empresa_id = v_emp AND codigo = 'ESTETICA';
+  SELECT id INTO v_esp_can  FROM core.especies WHERE codigo = 'CANINO';
   SELECT id INTO v_cat_med  FROM core.categorias WHERE empresa_id = v_emp AND codigo = 'MEDICAMENTO';
   SELECT id INTO v_cat_alim FROM core.categorias WHERE empresa_id = v_emp AND codigo = 'ALIMENTO';
   SELECT id INTO v_cat_prov FROM core.categorias WHERE empresa_id = v_emp AND codigo = 'LABORATORIO';
@@ -416,8 +440,71 @@ BEGIN
     (v_emp, 'SRV-0015', 'Ecografía abdominal',         'Ultrasonido abdominal completo',      'imagen',        NULL,       160.00, 50.00, 40, true,  v_super),
     (v_emp, 'SRV-0016', 'Baño medicado',               'Baño con shampoo terapéutico',        'grooming',      NULL,        55.00, 15.00, 60, false, v_super),
     (v_emp, 'SRV-0017', 'Corte y peinado',             'Grooming estético completo',          'grooming',      NULL,        75.00, 20.00, 90, false, v_super),
-    (v_emp, 'SRV-0018', 'Día de hospitalización',      'Internamiento con monitoreo',         'hospitalizacion',NULL,      180.00, 60.00,  0, false, v_super)
+    (v_emp, 'SRV-0018', 'Día de hospitalización',      'Internamiento con monitoreo',         'hospitalizacion',NULL,      180.00, 60.00,  0, false, v_super),
+    -- Carta de peluquería. Se cobra por servicio y no por paquete cerrado
+    -- porque en la práctica cada animal lleva una combinación distinta: el
+    -- schnauzer entra a corte de raza, el labrador a baño y deslanado.
+    (v_emp, 'SRV-0019', 'Baño e higiene',              'Baño, secado y cepillado',            'grooming',      v_cat_est,   45.00, 12.00, 60, false, v_super),
+    (v_emp, 'SRV-0020', 'Corte de raza',               'Corte según estándar de la raza',     'grooming',      v_cat_est,  110.00, 25.00,120, false, v_super),
+    (v_emp, 'SRV-0021', 'Deslanado',                   'Retiro de subpelo muerto',            'grooming',      v_cat_est,   90.00, 20.00, 90, false, v_super),
+    (v_emp, 'SRV-0022', 'Corte de uñas',               'Corte y limado',                      'grooming',      v_cat_est,   15.00,  3.00, 10, false, v_super),
+    (v_emp, 'SRV-0023', 'Limpieza de oídos',           'Higiene del conducto auditivo',       'grooming',      v_cat_est,   20.00,  5.00, 10, false, v_super),
+    (v_emp, 'SRV-0024', 'Vaciado de glándulas anales', 'Drenaje manual de sacos anales',      'grooming',      v_cat_est,   25.00,  5.00, 10, false, v_super),
+    (v_emp, 'SRV-0025', 'Baño antipulgas',             'Baño con shampoo ectoparasiticida',   'grooming',      v_cat_est,   70.00, 22.00, 75, false, v_super)
   ON CONFLICT (empresa_id, codigo) DO NOTHING;
+
+  -- ---- Planes preventivos ---------------------------------------------------
+  -- Tres tramos de vida, que es como se venden en la práctica: el cachorro
+  -- necesita el esquema completo de vacunas en su primer año, el adulto una
+  -- revisión y sus refuerzos, y el senior análisis que detecten a tiempo lo que
+  -- a esa edad aparece sin avisar.
+  --
+  -- Los precios son de referencia para la demostración; cada clínica pone los
+  -- suyos. Lo que importa es la estructura: cuota mensual, cupos por beneficio
+  -- y un descuento general sobre todo lo demás.
+  INSERT INTO core.planes (empresa_id, codigo, nombre, descripcion, periodicidad,
+                           precio, vigencia_meses, especie_id, edad_min_meses,
+                           edad_max_meses, descuento_general_pct, color, created_by)
+  VALUES
+    (v_emp, 'PLAN-CACHORRO', 'Plan Cachorro',
+     'El primer año completo: esquema de vacunación, desparasitaciones y controles.',
+     'mensual', 89.00, 12, v_esp_can, 0, 12, 20.00, '#22c55e', v_super),
+    (v_emp, 'PLAN-ADULTO', 'Plan Adulto',
+     'Medicina preventiva del año: controles, refuerzos y desparasitación.',
+     'mensual', 69.00, 12, NULL, 12, 84, 15.00, '#3b82f6', v_super),
+    (v_emp, 'PLAN-SENIOR', 'Plan Senior',
+     'A partir de los 7 años: más controles y análisis para ver venir lo que a esa edad no avisa.',
+     'mensual', 119.00, 12, NULL, 84, NULL, 15.00, '#a855f7', v_super)
+  ON CONFLICT (empresa_id, codigo) DO NOTHING;
+
+  -- Beneficios. NO se borran y se rehacen: las migraciones se reaplican en cada
+  -- despliegue, y `suscripcion_consumos.beneficio_id` se pone a NULL al borrar
+  -- el beneficio. Es decir, un DELETE aquí le reiniciaba a cada suscriptor el
+  -- contador de "3 consultas usadas de 3" y le regalaba el cupo otra vez.
+  INSERT INTO core.plan_beneficios (plan_id, tipo, servicio_id, cantidad, descripcion, orden)
+  SELECT p.id, 'servicio_incluido', s.id, b.cant, b.texto, b.orden
+  FROM core.planes p
+  JOIN (VALUES
+    ('PLAN-CACHORRO', 'SRV-0001', 4, '4 consultas generales',            1),
+    ('PLAN-CACHORRO', 'SRV-0004', 1, 'Vacuna antirrábica',               2),
+    ('PLAN-CACHORRO', 'SRV-0005', 3, 'Esquema quíntuple (3 dosis)',      3),
+    ('PLAN-CACHORRO', 'SRV-0007', 4, '4 desparasitaciones',              4),
+    ('PLAN-CACHORRO', 'SRV-0019', 2, '2 baños e higiene',                5),
+    ('PLAN-ADULTO',   'SRV-0001', 3, '3 consultas generales',            1),
+    ('PLAN-ADULTO',   'SRV-0004', 1, 'Refuerzo antirrábico anual',       2),
+    ('PLAN-ADULTO',   'SRV-0005', 1, 'Refuerzo quíntuple anual',         3),
+    ('PLAN-ADULTO',   'SRV-0007', 2, '2 desparasitaciones',              4),
+    ('PLAN-ADULTO',   'SRV-0019', 2, '2 baños e higiene',                5),
+    ('PLAN-SENIOR',   'SRV-0001', 4, '4 consultas geriátricas',          1),
+    ('PLAN-SENIOR',   'SRV-0004', 1, 'Refuerzo antirrábico anual',       2),
+    ('PLAN-SENIOR',   'SRV-0007', 2, '2 desparasitaciones',              3),
+    ('PLAN-SENIOR',   'SRV-0012', 1, 'Hemograma completo anual',         4),
+    ('PLAN-SENIOR',   'SRV-0013', 1, 'Perfil bioquímico anual',          5)
+  ) AS b(plan, srv, cant, texto, orden) ON b.plan = p.codigo
+  JOIN core.servicios s ON s.empresa_id = v_emp AND s.codigo = b.srv
+  WHERE p.empresa_id = v_emp
+  ON CONFLICT (plan_id, servicio_id) DO NOTHING;
+
 
   -- ---- Esquemas de vacunación ----------------------------------------------
   INSERT INTO core.esquemas_vacunacion (

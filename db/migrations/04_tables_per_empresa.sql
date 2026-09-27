@@ -15,6 +15,58 @@
 SET search_path = core, public;
 
 -- =============================================================================
+-- SEDES
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- sedes — los locales de una misma clínica
+--
+-- Una empresa puede tener varios locales. Lo que comparten es lo que define al
+-- negocio: la cartera de propietarios, la historia clínica de cada paciente, el
+-- catálogo de servicios y productos, el personal. Lo que NO comparten es todo
+-- lo que ocupa espacio físico: la agenda, los consultorios, el stock, la caja y
+-- el horario de atención.
+--
+-- Esa es la línea. Un propietario que viene al local de Surco y la semana
+-- siguiente al de Miraflores es el mismo propietario y su perro tiene una sola
+-- historia; pero el frasco de amoxicilina está en un local concreto y la caja
+-- la cuadra quien estuvo en ese mostrador.
+--
+-- `sede_id` es NULLABLE en todas las tablas que la referencian: una clínica de
+-- un solo local no tiene que enterarse de que esto existe. El trigger
+-- `trg_sede_por_defecto` la rellena sola.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.sedes (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id   UUID NOT NULL REFERENCES core.empresas(id) ON DELETE CASCADE,
+  codigo       VARCHAR(30) NOT NULL,
+  nombre       VARCHAR(120) NOT NULL,
+  direccion    VARCHAR(255),
+  distrito     VARCHAR(80),
+  provincia    VARCHAR(80),
+  departamento VARCHAR(80),
+  ubigeo       VARCHAR(10),
+  telefono     VARCHAR(30),
+  correo       VARCHAR(160),
+  -- Serie propia por local: dos mostradores numerando la misma serie se pisan.
+  serie_boleta   VARCHAR(10),
+  serie_factura  VARCHAR(10),
+  es_principal BOOLEAN NOT NULL DEFAULT false,
+  estado       core.estado_generico NOT NULL DEFAULT 'activo',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at   TIMESTAMPTZ,
+  created_by   UUID,
+  updated_by   UUID,
+  CONSTRAINT uq_sedes_codigo UNIQUE (empresa_id, codigo)
+);
+CREATE INDEX IF NOT EXISTS ix_sedes_empresa ON core.sedes (empresa_id) WHERE deleted_at IS NULL;
+
+-- Una sola principal por empresa: es la que hereda todo lo que no diga sede.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sedes_principal
+  ON core.sedes (empresa_id) WHERE es_principal AND deleted_at IS NULL;
+
+-- =============================================================================
 -- CARTERA: PROPIETARIOS Y PACIENTES
 -- =============================================================================
 
@@ -1307,3 +1359,297 @@ DO $$ BEGIN
   ALTER TABLE core.pagos
     ADD CONSTRAINT fk_pagos_caja FOREIGN KEY (caja_id) REFERENCES core.cajas(id);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- =============================================================================
+-- SEDE EN LAS TABLAS QUE OCUPAN ESPACIO FÍSICO
+--
+-- Van aquí, al final, porque `core.sedes` tiene que existir antes que la clave
+-- foránea que la apunta. Todas admiten NULL: una clínica de un local no cambia
+-- nada, y el trigger `trg_sede_por_defecto` las rellena con la sede principal.
+-- =============================================================================
+
+DO $$
+DECLARE
+  t TEXT;
+  -- Lo que pertenece a un local concreto. `users` lleva la sede base del
+  -- empleado: en qué mostrador ficha y sobre qué caja abre por defecto.
+  tablas TEXT[] := ARRAY[
+    'consultorios','almacenes','horarios_atencion','citas','cajas',
+    'consultas','hospitalizaciones','comprobantes','users'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tablas LOOP
+    EXECUTE format(
+      'ALTER TABLE core.%1$s ADD COLUMN IF NOT EXISTS sede_id UUID
+         REFERENCES core.sedes(id) ON DELETE SET NULL', t);
+    EXECUTE format(
+      'CREATE INDEX IF NOT EXISTS ix_%1$s_sede ON core.%1$s (sede_id)
+         WHERE sede_id IS NOT NULL', t);
+  END LOOP;
+END $$;
+
+-- El nombre del consultorio es único por sede, no por empresa: dos locales
+-- pueden tener cada uno su "Consultorio 1".
+--
+-- Sin COALESCE sobre sede_id a propósito. Con él, una fila vieja (sede NULL) y
+-- una nueva (sede puesta por el trigger) son claves distintas y el índice deja
+-- pasar el duplicado justo en la migración que debía evitarlo. El trigger llena
+-- la sede en todo lo que entra y el relleno de 39_app_sedes.sql cubre lo de
+-- antes, así que NULL es un estado de tránsito, no uno en el que se opere.
+ALTER TABLE core.consultorios DROP CONSTRAINT IF EXISTS uq_consultorios_nombre;
+DROP INDEX IF EXISTS core.uq_consultorios_nombre_sede;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_consultorios_nombre_sede
+  ON core.consultorios (empresa_id, sede_id, nombre);
+
+-- =============================================================================
+-- PELUQUERÍA
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- peluqueria_ordenes — la ficha de un baño o un corte
+--
+-- No es una cita ni una consulta: es una estancia. El animal entra a las nueve,
+-- lo bañan, lo secan, lo cortan y lo recoge alguien a las dos. En medio hay dos
+-- cosas que el ERP tiene que sostener y que ninguna otra tabla sostiene:
+--
+-- 1. EL ESTADO EN QUE LLEGÓ. La discusión clásica de una peluquería canina es
+--    "mi perro no tenía esa herida cuando lo traje". Si nadie dejó constancia
+--    al recibirlo, la discusión la pierde la clínica siempre. Por eso la
+--    recepción es un acto con su propio registro y su foto.
+--
+-- 2. LO QUE EL PELUQUERO ENCUENTRA. Es quien más toca al animal: le mira la
+--    piel entera, las orejas, las uñas, los dientes. Encuentra pulgas, bultos y
+--    otitis antes que nadie. Ese hallazgo no puede morir en una libreta: entra
+--    en la historia clínica y, si hace falta, levanta un aviso al veterinario.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.peluqueria_ordenes (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id      UUID NOT NULL REFERENCES core.empresas(id) ON DELETE CASCADE,
+  sede_id         UUID REFERENCES core.sedes(id) ON DELETE SET NULL,
+  codigo          VARCHAR(20),
+  mascota_id      UUID NOT NULL REFERENCES core.mascotas(id) ON DELETE RESTRICT,
+  cliente_id      UUID NOT NULL REFERENCES core.clientes(id) ON DELETE RESTRICT,
+  cita_id         UUID REFERENCES core.citas(id) ON DELETE SET NULL,
+  peluquero_id    UUID REFERENCES core.users(id),
+
+  fecha_ingreso   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  hora_inicio     TIMESTAMPTZ,
+  hora_fin        TIMESTAMPTZ,
+  fecha_entrega   TIMESTAMPTZ,
+  -- Lo que se le prometió al propietario. Si se pasa, se sabe.
+  entrega_estimada TIMESTAMPTZ,
+
+  -- ---- Recepción: el estado en que llegó -----------------------------------
+  peso_kg         NUMERIC(6,2),
+  condicion_pelaje VARCHAR(40),          -- normal | nudos_leves | nudos_severos | apelmazado
+  temperamento    VARCHAR(40),           -- docil | nervioso | agresivo | requiere_bozal
+  observaciones_ingreso TEXT,
+  foto_ingreso    TEXT,                  -- storage_key en MinIO
+  -- El propietario autoriza rapar si el nudo no se puede desenredar sin dolor.
+  autoriza_rapado BOOLEAN NOT NULL DEFAULT false,
+
+  -- ---- Salida ---------------------------------------------------------------
+  foto_salida     TEXT,
+  observaciones_salida TEXT,
+  entregado_a     VARCHAR(160),
+  documento_receptor VARCHAR(20),
+
+  estado          core.estado_peluqueria NOT NULL DEFAULT 'recibido',
+  motivo_cancelacion TEXT,
+  total           NUMERIC(12,2) NOT NULL DEFAULT 0,
+
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at      TIMESTAMPTZ,
+  created_by      UUID,
+  updated_by      UUID
+);
+CREATE INDEX IF NOT EXISTS ix_peluqueria_empresa
+  ON core.peluqueria_ordenes (empresa_id, estado, fecha_ingreso DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_peluqueria_mascota
+  ON core.peluqueria_ordenes (mascota_id, fecha_ingreso DESC);
+
+-- -----------------------------------------------------------------------------
+-- peluqueria_items — qué se le hizo
+-- Baño, corte de raza, deslanado, uñas, oídos, glándulas, tinte. Cada línea es
+-- un servicio del catálogo, así que se cobra por el mismo camino que todo lo
+-- demás y no se escapa de la cuenta.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.peluqueria_items (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  orden_id     UUID NOT NULL REFERENCES core.peluqueria_ordenes(id) ON DELETE CASCADE,
+  servicio_id  UUID NOT NULL REFERENCES core.servicios(id),
+  cantidad     NUMERIC(10,2) NOT NULL DEFAULT 1,
+  precio_unitario NUMERIC(12,2) NOT NULL DEFAULT 0,
+  total        NUMERIC(12,2) NOT NULL DEFAULT 0,
+  nota         TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_peluqueria_item UNIQUE (orden_id, servicio_id)
+);
+
+-- -----------------------------------------------------------------------------
+-- peluqueria_hallazgos — lo que vio quien bañó al animal
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.peluqueria_hallazgos (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  orden_id    UUID NOT NULL REFERENCES core.peluqueria_ordenes(id) ON DELETE CASCADE,
+  hallazgo    core.hallazgo_peluqueria NOT NULL,
+  zona        VARCHAR(80),
+  detalle     TEXT,
+  -- Marca lo que no puede esperar a la próxima visita.
+  requiere_veterinario BOOLEAN NOT NULL DEFAULT false,
+  atendido_at TIMESTAMPTZ,
+  atendido_por UUID REFERENCES core.users(id),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by  UUID
+);
+CREATE INDEX IF NOT EXISTS ix_peluqueria_hallazgos_pendientes
+  ON core.peluqueria_hallazgos (orden_id) WHERE requiere_veterinario AND atendido_at IS NULL;
+
+-- =============================================================================
+-- PLANES PREVENTIVOS
+--
+-- No confundir con `esquemas_vacunacion`, que es el protocolo clínico: qué
+-- vacuna toca a las seis semanas y cuándo el refuerzo. Eso es medicina y ya
+-- estaba.
+--
+-- Esto es lo comercial: el propietario paga una cuota y a cambio el año de
+-- salud de su perro está cubierto. Es lo que convierte a un cliente que aparece
+-- cuando el animal ya está enfermo en uno que viene tres veces al año, y lo que
+-- le da a la clínica un ingreso que no depende de que alguien se enferme.
+--
+-- La condición para que esto no sea una hoja de cálculo es que el plan LLEGUE
+-- A LA CUENTA: cuando el veterinario aplica una vacuna incluida, la orden de
+-- servicio tiene que salir en cero y el consumo quedar descontado. Eso se
+-- resuelve en `internal.registrar_cargo_servicio`, por donde ya pasan todos los
+-- cargos del sistema.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS core.planes (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id     UUID NOT NULL REFERENCES core.empresas(id) ON DELETE CASCADE,
+  codigo         VARCHAR(40) NOT NULL,
+  nombre         VARCHAR(180) NOT NULL,
+  descripcion    TEXT,
+  -- Cada cuánto se cobra la cuota.
+  periodicidad   core.periodicidad_plan NOT NULL DEFAULT 'mensual',
+  precio         NUMERIC(12,2) NOT NULL DEFAULT 0,
+  -- Cuánto dura la cobertura desde el alta. 12 = un año.
+  vigencia_meses INT NOT NULL DEFAULT 12,
+
+  -- A quién va dirigido. Un "Plan Cachorro" no se le vende a un perro de diez
+  -- años, y el sistema debería decirlo en vez de dejar que se venda mal.
+  especie_id     UUID REFERENCES core.especies(id),
+  edad_min_meses INT,
+  edad_max_meses INT,
+
+  -- Descuento sobre todo lo que no esté incluido explícitamente.
+  descuento_general_pct NUMERIC(5,2) NOT NULL DEFAULT 0
+    CHECK (descuento_general_pct BETWEEN 0 AND 100),
+  color          VARCHAR(20),
+  estado         core.estado_generico NOT NULL DEFAULT 'activo',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at     TIMESTAMPTZ,
+  created_by     UUID,
+  updated_by     UUID,
+  CONSTRAINT uq_planes_codigo UNIQUE (empresa_id, codigo),
+  CONSTRAINT ck_planes_edades CHECK (
+    edad_min_meses IS NULL OR edad_max_meses IS NULL OR edad_max_meses >= edad_min_meses)
+);
+
+-- -----------------------------------------------------------------------------
+-- plan_beneficios — qué incluye
+--
+-- `servicio_incluido` con cantidad: "4 consultas al año", "1 profilaxis dental".
+-- `descuento_servicio` / `descuento_producto`: no lo regala, lo abarata.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.plan_beneficios (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  plan_id       UUID NOT NULL REFERENCES core.planes(id) ON DELETE CASCADE,
+  tipo          core.tipo_beneficio_plan NOT NULL DEFAULT 'servicio_incluido',
+  servicio_id   UUID REFERENCES core.servicios(id),
+  categoria_id  UUID REFERENCES core.categorias(id),
+  -- Cuántas veces entra en la vigencia completa. NULL = sin tope.
+  cantidad      INT,
+  descuento_pct NUMERIC(5,2) NOT NULL DEFAULT 0
+    CHECK (descuento_pct BETWEEN 0 AND 100),
+  descripcion   VARCHAR(255),
+  orden         INT NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Un servicio no puede estar dos veces en el mismo plan: si no, no se sabe
+  -- cuál de las dos reglas aplica.
+  CONSTRAINT uq_plan_beneficio_servicio UNIQUE (plan_id, servicio_id)
+);
+CREATE INDEX IF NOT EXISTS ix_plan_beneficios ON core.plan_beneficios (plan_id);
+
+-- -----------------------------------------------------------------------------
+-- suscripciones — el plan de UN paciente
+--
+-- Se suscribe la mascota, no el propietario: quien se vacuna es el animal, y un
+-- cliente con tres perros puede tener a uno en plan y a los otros no.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.suscripciones (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id     UUID NOT NULL REFERENCES core.empresas(id) ON DELETE CASCADE,
+  plan_id        UUID NOT NULL REFERENCES core.planes(id),
+  mascota_id     UUID NOT NULL REFERENCES core.mascotas(id) ON DELETE CASCADE,
+  cliente_id     UUID NOT NULL REFERENCES core.clientes(id) ON DELETE RESTRICT,
+  codigo         VARCHAR(20),
+
+  fecha_inicio   DATE NOT NULL DEFAULT CURRENT_DATE,
+  fecha_fin      DATE NOT NULL,
+  -- El precio se congela al contratar: si la clínica sube la tarifa, quien ya
+  -- estaba paga lo que firmó hasta que renueve.
+  precio_pactado NUMERIC(12,2) NOT NULL DEFAULT 0,
+  periodicidad   core.periodicidad_plan NOT NULL DEFAULT 'mensual',
+  proximo_cobro  DATE,
+
+  estado         core.estado_suscripcion NOT NULL DEFAULT 'activa',
+  motivo_baja    TEXT,
+  renovada_de    UUID REFERENCES core.suscripciones(id),
+  notas          TEXT,
+
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by     UUID,
+  updated_by     UUID,
+  CONSTRAINT ck_suscripcion_vigencia CHECK (fecha_fin >= fecha_inicio)
+);
+CREATE INDEX IF NOT EXISTS ix_suscripciones_mascota
+  ON core.suscripciones (mascota_id, estado);
+CREATE INDEX IF NOT EXISTS ix_suscripciones_vencimiento
+  ON core.suscripciones (empresa_id, fecha_fin) WHERE estado = 'activa';
+
+-- Un paciente no puede tener dos planes activos a la vez: al cobrar habría que
+-- decidir cuál cubre, y esa decisión no la puede tomar el sistema.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_suscripcion_activa
+  ON core.suscripciones (mascota_id) WHERE estado = 'activa';
+
+-- -----------------------------------------------------------------------------
+-- suscripcion_consumos — qué se ha gastado del plan
+-- Una fila por uso. Es lo que responde "¿le quedan consultas?" sin recalcular
+-- nada, y lo que se le enseña al propietario cuando pregunta qué ha recibido.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.suscripcion_consumos (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  suscripcion_id  UUID NOT NULL REFERENCES core.suscripciones(id) ON DELETE CASCADE,
+  beneficio_id    UUID REFERENCES core.plan_beneficios(id) ON DELETE SET NULL,
+  servicio_id     UUID REFERENCES core.servicios(id),
+  orden_servicio_id UUID,
+  cantidad        NUMERIC(10,2) NOT NULL DEFAULT 1,
+  -- Lo que habría costado sin plan. Sirve para enseñarle al propietario cuánto
+  -- lleva ahorrado, que es el mejor argumento para que renueve.
+  valor_cubierto  NUMERIC(12,2) NOT NULL DEFAULT 0,
+  fecha           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by      UUID
+);
+CREATE INDEX IF NOT EXISTS ix_suscripcion_consumos
+  ON core.suscripcion_consumos (suscripcion_id, servicio_id);
+
+-- La orden de servicio recuerda qué plan la cubrió: sin esto, una orden en cero
+-- es indistinguible de un error de tarifa.
+ALTER TABLE core.ordenes_servicio
+  ADD COLUMN IF NOT EXISTS suscripcion_id UUID REFERENCES core.suscripciones(id) ON DELETE SET NULL;
+ALTER TABLE core.ordenes_servicio
+  ADD COLUMN IF NOT EXISTS cubierto_por_plan BOOLEAN NOT NULL DEFAULT false;

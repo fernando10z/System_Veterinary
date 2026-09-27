@@ -306,10 +306,13 @@ BEGIN
       'error', internal.error_jsonb('CONFLICT','Ya tienes una caja abierta. Ciérrala antes de abrir otra.'));
   END IF;
 
+  -- La caja es del mostrador donde está el cajero. Sin esto, el arqueo de
+  -- Miraflores acabaría sumado al de la sede principal.
   INSERT INTO core.cajas (
-    empresa_id, numero, user_apertura_id, monto_apertura, observaciones)
+    empresa_id, sede_id, numero, user_apertura_id, monto_apertura, observaciones)
   VALUES (
-    v_emp, internal.siguiente_numero(v_emp, 'CAJA', 5), p_user_id,
+    v_emp, internal.sede_efectiva(p_user_id, v_emp), 
+    internal.siguiente_numero(v_emp, 'CAJA', 5), p_user_id,
     COALESCE(p_monto_apertura, 0), p_observaciones)
   RETURNING id INTO v_id;
 
@@ -485,6 +488,7 @@ BEGIN
 
   SELECT to_jsonb(x) INTO v_data FROM (
     SELECT c.id, c.numero, c.fecha_apertura, c.monto_apertura, c.estado,
+           c.sede_id, (SELECT se.nombre FROM core.sedes se WHERE se.id = c.sede_id) AS sede,
            COALESCE((SELECT SUM(monto) FROM core.movimientos_caja mc
                       WHERE mc.caja_id = c.id AND mc.tipo = 'ingreso'), 0) AS ingresos,
            COALESCE((SELECT SUM(monto) FROM core.movimientos_caja mc

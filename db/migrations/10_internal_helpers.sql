@@ -247,6 +247,106 @@ BEGIN
 END;
 $$;
 
+
+-- -----------------------------------------------------------------------------
+-- internal.sede_por_defecto
+-- La sede principal de la empresa. Si no hay ninguna, la crea con los datos de
+-- la propia empresa.
+--
+-- Crear desde una función de lectura es raro, y aquí está justificado: `sedes`
+-- llegó cuando ya había clínicas operando, y el resto del sistema necesita
+-- SIEMPRE una sede a la que colgar una cita o una caja. La alternativa era
+-- obligar a cada instalación existente a crearla a mano antes de poder seguir
+-- trabajando, o dejar `sede_id` en NULL y que los informes por local mintieran.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.sede_por_defecto(p_empresa_id UUID)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_id UUID;
+BEGIN
+  IF p_empresa_id IS NULL THEN RETURN NULL; END IF;
+
+  SELECT id INTO v_id FROM core.sedes
+   WHERE empresa_id = p_empresa_id AND es_principal AND deleted_at IS NULL;
+  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+
+  -- Puede haber sedes sin principal si alguien la borró: se toma la más antigua.
+  SELECT id INTO v_id FROM core.sedes
+   WHERE empresa_id = p_empresa_id AND deleted_at IS NULL
+   ORDER BY created_at LIMIT 1;
+  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+
+  -- El código sale del mismo contador que usará la pantalla de sedes. Ponerlo
+  -- a mano como 'SEDE-01' dejaba el contador en cero, y la primera sede que
+  -- creara la clínica a mano chocaba contra esta.
+  INSERT INTO core.sedes (
+    empresa_id, codigo, nombre, direccion, distrito, provincia, departamento,
+    ubigeo, telefono, correo, serie_boleta, serie_factura, es_principal)
+  SELECT e.id, internal.siguiente_numero(e.id, 'SEDE', 2), 'Sede principal',
+         e.direccion_fiscal, e.distrito,
+         e.provincia, e.departamento, e.ubigeo, e.telefono, e.correo,
+         e.serie_boleta_default, e.serie_factura_default, true
+    FROM core.empresas e WHERE e.id = p_empresa_id
+  ON CONFLICT (empresa_id, codigo) DO NOTHING
+  RETURNING id INTO v_id;
+
+  IF v_id IS NULL THEN
+    SELECT id INTO v_id FROM core.sedes
+     WHERE empresa_id = p_empresa_id AND deleted_at IS NULL
+     ORDER BY created_at LIMIT 1;
+  END IF;
+
+  RETURN v_id;
+END;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- internal.sede_efectiva
+-- Sobre qué local se está operando.
+--
+-- Orden: la sede que pide el SP (validada contra la empresa, que si no sería la
+-- vía para escribir en el local de otro) → la sede base del usuario → la
+-- principal. Un recepcionista de Miraflores no tiene que elegir nada para que
+-- su caja y sus citas caigan en Miraflores.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.sede_efectiva(
+  p_user_id    UUID,
+  p_empresa_id UUID,
+  p_sede_id    UUID DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_id UUID;
+BEGIN
+  IF p_sede_id IS NOT NULL THEN
+    SELECT id INTO v_id FROM core.sedes
+     WHERE id = p_sede_id AND empresa_id = p_empresa_id AND deleted_at IS NULL;
+    IF v_id IS NULL THEN
+      RAISE EXCEPTION 'La sede indicada no existe en esta empresa' USING ERRCODE = '42501';
+    END IF;
+    RETURN v_id;
+  END IF;
+
+  SELECT u.sede_id INTO v_id
+    FROM core.users u
+    JOIN core.sedes s ON s.id = u.sede_id AND s.deleted_at IS NULL
+   WHERE u.id = p_user_id AND u.empresa_id = p_empresa_id;
+  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+
+  RETURN internal.sede_por_defecto(p_empresa_id);
+END;
+$$;
+
 -- -----------------------------------------------------------------------------
 -- internal.tiene_permiso — variante que responde en vez de abortar.
 -- assert_permiso corta la operación; esto sirve cuando el permiso no decide si
@@ -908,6 +1008,137 @@ BEGIN
 END;
 $$;
 
+
+-- -----------------------------------------------------------------------------
+-- internal.cobertura_plan
+-- ¿Este servicio, para este paciente, lo cubre su plan preventivo?
+--
+-- Devuelve qué suscripción aplica, qué beneficio, cuánto se paga al final y
+-- cuánto se ahorró. Si el paciente no tiene plan, devuelve el precio de lista y
+-- ya está: quien llama no tiene que saber si hay planes en esta clínica.
+--
+-- El orden importa. Primero el beneficio del servicio exacto —"4 consultas
+-- incluidas"—, luego el de su categoría, y por último el descuento general del
+-- plan. Un servicio incluido con el cupo agotado NO cae al descuento general
+-- por accidente: cae al descuento del propio beneficio si lo tiene, y si no, al
+-- general. Cualquier otra cosa sería regalar de más o cobrar de más, y las dos
+-- se notan en el mostrador.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.cobertura_plan(
+  p_empresa_id  UUID,
+  p_mascota_id  UUID,
+  p_servicio_id UUID,
+  p_precio      NUMERIC,
+  p_cantidad    NUMERIC DEFAULT 1
+)
+RETURNS TABLE (
+  suscripcion_id UUID,
+  beneficio_id   UUID,
+  incluido       BOOLEAN,
+  precio_final   NUMERIC,
+  ahorro         NUMERIC,
+  motivo         TEXT
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_sus      RECORD;
+  v_ben      RECORD;
+  v_usado    NUMERIC := 0;
+  v_cat      UUID;
+  v_dto      NUMERIC := 0;
+  v_precio   NUMERIC := COALESCE(p_precio, 0);
+BEGIN
+  suscripcion_id := NULL; beneficio_id := NULL; incluido := false;
+  precio_final := v_precio; ahorro := 0; motivo := NULL;
+
+  IF p_mascota_id IS NULL OR p_servicio_id IS NULL THEN
+    RETURN NEXT; RETURN;
+  END IF;
+
+  SELECT s.id, s.plan_id, p.descuento_general_pct, p.nombre
+    INTO v_sus
+    FROM core.suscripciones s
+    JOIN core.planes p ON p.id = s.plan_id
+   WHERE s.mascota_id = p_mascota_id
+     AND s.empresa_id = p_empresa_id
+     AND s.estado = 'activa'
+     AND CURRENT_DATE BETWEEN s.fecha_inicio AND s.fecha_fin
+   LIMIT 1;
+
+  IF v_sus.id IS NULL THEN
+    RETURN NEXT; RETURN;
+  END IF;
+
+  suscripcion_id := v_sus.id;
+
+  -- ---- 1. Beneficio del servicio exacto -------------------------------------
+  SELECT b.* INTO v_ben
+    FROM core.plan_beneficios b
+   WHERE b.plan_id = v_sus.plan_id AND b.servicio_id = p_servicio_id;
+
+  -- ---- 2. Si no, el de su categoría ------------------------------------------
+  IF v_ben.id IS NULL THEN
+    SELECT s.categoria_id INTO v_cat FROM core.servicios s WHERE s.id = p_servicio_id;
+    IF v_cat IS NOT NULL THEN
+      SELECT b.* INTO v_ben
+        FROM core.plan_beneficios b
+       WHERE b.plan_id = v_sus.plan_id AND b.categoria_id = v_cat
+         AND b.servicio_id IS NULL
+       LIMIT 1;
+    END IF;
+  END IF;
+
+  IF v_ben.id IS NOT NULL THEN
+    beneficio_id := v_ben.id;
+
+    IF v_ben.tipo = 'servicio_incluido' THEN
+      SELECT COALESCE(SUM(c.cantidad), 0) INTO v_usado
+        FROM core.suscripcion_consumos c
+       WHERE c.suscripcion_id = v_sus.id AND c.beneficio_id = v_ben.id;
+
+      -- cantidad NULL = sin tope dentro de la vigencia.
+      IF v_ben.cantidad IS NULL OR v_usado + p_cantidad <= v_ben.cantidad THEN
+        incluido     := true;
+        precio_final := 0;
+        ahorro       := round(v_precio * p_cantidad, 2);
+        motivo       := format('Incluido en %s', v_sus.nombre);
+        RETURN NEXT; RETURN;
+      END IF;
+
+      -- Cupo agotado: queda el descuento, pero esto ya NO consume el beneficio.
+      -- Se suelta el beneficio_id para que el contador no siga subiendo y la
+      -- ficha del propietario no acabe diciendo "4 usadas de 3".
+      motivo := format('Cupo agotado en %s (%s de %s usados)',
+                       v_sus.nombre, trunc(v_usado), v_ben.cantidad);
+      beneficio_id := NULL;
+    END IF;
+
+    v_dto := GREATEST(v_ben.descuento_pct, 0);
+  END IF;
+
+  -- ---- 3. Descuento general del plan -----------------------------------------
+  IF v_dto = 0 THEN
+    v_dto := COALESCE(v_sus.descuento_general_pct, 0);
+    IF v_dto > 0 AND motivo IS NULL THEN
+      motivo := format('%s%% de descuento por %s', v_dto, v_sus.nombre);
+    END IF;
+  ELSIF motivo IS NULL THEN
+    motivo := format('%s%% de descuento por %s', v_dto, v_sus.nombre);
+  END IF;
+
+  IF v_dto > 0 THEN
+    precio_final := round(v_precio * (1 - v_dto / 100.0), 2);
+    ahorro       := round((v_precio - precio_final) * p_cantidad, 2);
+  END IF;
+
+  RETURN NEXT;
+END;
+$$;
+
 -- -----------------------------------------------------------------------------
 -- internal.registrar_cargo_servicio
 --
@@ -940,6 +1171,7 @@ DECLARE
   v_precio  NUMERIC(12,2);
   v_tabla   TEXT := NULLIF(p_refs->>'origen_tabla','');
   v_origen  UUID := NULLIF(p_refs->>'origen_id','')::uuid;
+  v_cob     RECORD;
 BEGIN
   IF p_servicio_id IS NULL OR p_mascota_id IS NULL THEN
     RETURN NULL;
@@ -963,20 +1195,48 @@ BEGIN
     IF v_id IS NOT NULL THEN RETURN v_id; END IF;
   END IF;
 
+  -- ¿Lo cubre el plan preventivo del paciente?
+  --
+  -- Aquí, y no en cada SP clínico, porque por esta función pasan TODOS los
+  -- cargos del sistema: consulta, vacuna, desparasitación, cirugía, día de
+  -- hospitalización y baño. Poner el plan en este punto es lo que hace que
+  -- contratar uno cambie de verdad lo que el propietario paga, en vez de ser
+  -- una etiqueta bonita en su ficha.
+  SELECT * INTO v_cob
+    FROM internal.cobertura_plan(p_empresa_id, p_mascota_id, p_servicio_id,
+                                 v_precio, p_cantidad);
+
   INSERT INTO core.ordenes_servicio (
     empresa_id, codigo, mascota_id, cliente_id, servicio_id, veterinario_id,
     cita_id, consulta_id, cantidad, precio_unitario, descuento, total,
-    descripcion, origen_tabla, origen_id, estado, created_by
+    descripcion, origen_tabla, origen_id, estado, created_by,
+    suscripcion_id, cubierto_por_plan
   ) VALUES (
     p_empresa_id, internal.siguiente_numero(p_empresa_id, 'OS', 6),
     p_mascota_id, v_cliente, p_servicio_id,
     COALESCE(NULLIF(p_refs->>'veterinario_id','')::uuid, p_user_id),
     NULLIF(p_refs->>'cita_id','')::uuid,
     NULLIF(p_refs->>'consulta_id','')::uuid,
-    p_cantidad, v_precio, 0, round(p_cantidad * v_precio, 2),
-    p_refs->>'descripcion', v_tabla, v_origen,
-    'completado', p_user_id
+    p_cantidad, v_precio,
+    COALESCE(v_cob.ahorro, 0),
+    round(p_cantidad * COALESCE(v_cob.precio_final, v_precio), 2),
+    -- El motivo va en la descripción: el propietario tiene derecho a ver por
+    -- qué su consulta sale en cero, y el mostrador a poder explicárselo.
+    COALESCE(p_refs->>'descripcion', '') ||
+      CASE WHEN v_cob.motivo IS NOT NULL THEN ' — ' || v_cob.motivo ELSE '' END,
+    v_tabla, v_origen, 'completado', p_user_id,
+    v_cob.suscripcion_id, COALESCE(v_cob.incluido, false)
   ) RETURNING id INTO v_id;
+
+  -- El consumo se anota solo cuando el plan puso algo: sin esto, el cupo de
+  -- "4 consultas al año" nunca bajaría y el plan sería infinito.
+  IF v_cob.suscripcion_id IS NOT NULL AND COALESCE(v_cob.ahorro, 0) > 0 THEN
+    INSERT INTO core.suscripcion_consumos (
+      suscripcion_id, beneficio_id, servicio_id, orden_servicio_id,
+      cantidad, valor_cubierto, created_by)
+    VALUES (v_cob.suscripcion_id, v_cob.beneficio_id, p_servicio_id, v_id,
+            p_cantidad, v_cob.ahorro, p_user_id);
+  END IF;
 
   RETURN v_id;
 END;
