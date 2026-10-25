@@ -1,37 +1,38 @@
 // =============================================================================
-// PM2 — proceso del backend en producción.
+// PM2 ecosystem — Producción ERP Veterinary (servidor erp-prod).
 //
-//   pm2 start infra/pm2/ecosystem.config.js
-//   pm2 save && pm2 startup
+//   veterinary-api → backend NestJS (dist/main.js) en :3200
 //
-// El frontend NO va aquí: se compila a estáticos y los sirve nginx.
+// El frontend NO corre en pm2: lo sirve Caddy (infra/caddy/veterinary.caddy)
+// en 127.0.0.1:5373 junto con /api → :3200 y /veterinary → MinIO, con las
+// mismas cabeceras de seguridad que frontend/nginx.conf. Un solo hostname en
+// el Cloudflare Tunnel: veterinary.solvifylab.com → localhost:5373.
 //
-// Rotación de logs: PM2 no rota por sí solo y /var/log/veterp crece sin
-// límite. Instalar el módulo una vez por servidor:
-//   pm2 install pm2-logrotate
-//   pm2 set pm2-logrotate:max_size 20M
-//   pm2 set pm2-logrotate:retain 14
-//   pm2 set pm2-logrotate:compress true
-// (o una regla de logrotate del sistema con `copytruncate` sobre /var/log/veterp/*.log)
+// Corre desde $APP/current (symlink al release activo), nunca desde src/.
+// Publicar: infra/scripts/deploy.sh   ·   Volver atrás: deploy.sh rollback
+//
+// Arranque inicial:
+//   pm2 start infra/pm2/ecosystem.config.js && pm2 save
 // =============================================================================
+const APP = "/srv/apps/erp-veterinary";
+const LOGS = "/var/log/apps/erp-veterinary";
 
 module.exports = {
   apps: [
     {
-      name: "veterp-api",
-      cwd: "/var/www/veterp/backend",
+      name: "veterinary-api",
+      namespace: "veterinary",
+      // ConfigModule lee .env del cwd: current/backend/.env → shared/backend.env
+      cwd: `${APP}/current/backend`,
       script: "dist/main.js",
-      // cluster aprovecha todos los núcleos; el backend no guarda estado en
-      // memoria (las sesiones viven en Redis), así que escalar es seguro.
-      exec_mode: "cluster",
-      instances: "max",
-      env: {
-        NODE_ENV: "production",
-        TZ: "America/Lima",
-      },
-      max_memory_restart: "512M",
-      error_file: "/var/log/veterp/api-error.log",
-      out_file: "/var/log/veterp/api-out.log",
+      instances: 1,
+      exec_mode: "fork",
+      autorestart: true,
+      max_memory_restart: "400M",
+      kill_timeout: 10000,
+      env: { NODE_ENV: "production", TZ: "America/Lima" },
+      out_file: `${LOGS}/api-out.log`,
+      error_file: `${LOGS}/api-err.log`,
       merge_logs: true,
       time: true,
     },
