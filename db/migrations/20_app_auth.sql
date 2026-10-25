@@ -10,15 +10,15 @@
 SET search_path = app, internal, core, public;
 
 -- El rol de la aplicación tiene que existir antes de 90_grants.sql: varias
--- migraciones de SPs (34–37) terminan con un GRANT a vet_app_user, y sobre un
+-- migraciones de SPs (34–37) terminan con un GRANT a erp_veterinary_user, y sobre un
 -- cluster recién creado —un servidor nuevo, el CI— fallaban con "role
--- vet_app_user does not exist". Se crea aquí, igual que en 90_grants.sql: sin
+-- erp_veterinary_user does not exist". Se crea aquí, igual que en 90_grants.sql: sin
 -- contraseña utilizable hasta que el despliegue la fije.
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vet_app_user') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_veterinary_user') THEN
     EXECUTE format(
-      'CREATE ROLE vet_app_user LOGIN PASSWORD %L',
+      'CREATE ROLE erp_veterinary_user LOGIN PASSWORD %L',
       encode(gen_random_bytes(32), 'base64'));
   END IF;
 END $$;

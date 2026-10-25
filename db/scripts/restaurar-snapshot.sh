@@ -45,7 +45,7 @@ echo "→ Restaurando"
 gzip -dc "$DUMP" | run_psql > /dev/null
 
 # El volcado va sin ACLs: el rol de la aplicación y sus permisos se rehacen aquí.
-echo "→ Rol de aplicación (vet_app_user) y permisos"
+echo "→ Rol de aplicación (erp_veterinary_user) y permisos"
 run_psql -f "$REPO_DIR/db/migrations/90_grants.sql" > /dev/null
 
 if [[ -n "${VET_APP_PASSWORD:-}" ]]; then
@@ -53,14 +53,14 @@ if [[ -n "${VET_APP_PASSWORD:-}" ]]; then
   PSQL_DOCKER_ENV=(-e VET_APP_PASSWORD)
   run_psql > /dev/null <<'SQL'
 \getenv app_pwd VET_APP_PASSWORD
-ALTER ROLE vet_app_user WITH LOGIN PASSWORD :'app_pwd';
+ALTER ROLE erp_veterinary_user WITH LOGIN PASSWORD :'app_pwd';
 SQL
-  echo "✓ Base '$DB_NAME' lista (contraseña de vet_app_user fijada)."
+  echo "✓ Base '$DB_NAME' lista (contraseña de erp_veterinary_user fijada)."
 else
   echo "✓ Base '$DB_NAME' lista."
   echo
   echo "  Falta fijar la contraseña del rol con el que se conecta el backend:"
   echo "    VET_APP_PASSWORD='<secreto>' bash db/scripts/restaurar-snapshot.sh"
-  echo "  o bien  ALTER ROLE vet_app_user WITH PASSWORD '<secreto>';"
+  echo "  o bien  ALTER ROLE erp_veterinary_user WITH PASSWORD '<secreto>';"
   echo "  y ponerla en backend/.env  →  DATABASE_URL"
 fi

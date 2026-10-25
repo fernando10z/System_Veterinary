@@ -63,7 +63,7 @@ jobs:
         working-directory: backend
         run: |
           cp .env.example .env
-          sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://vet_app_user:${VET_APP_PASSWORD}@localhost:5435/vet_demo#" .env
+          sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://erp_veterinary_user:${VET_APP_PASSWORD}@localhost:5435/vet_demo#" .env
           sed -i "s#^LOG_PRETTY=.*#LOG_PRETTY=false#" .env
           nohup node dist/main > ../api.log 2>&1 &
           for i in $(seq 1 60); do

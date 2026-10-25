@@ -76,7 +76,7 @@ export function reglasProduccion(raw: Record<string, unknown>): string[] {
     const usuario = decodeURIComponent(new URL(String(raw.DATABASE_URL ?? "")).username);
     if (usuario === "postgres" && raw.ALLOW_DB_SUPERUSER !== "true") {
       errores.push(
-        "DATABASE_URL: en producción el backend se conecta con vet_app_user, no con postgres",
+        "DATABASE_URL: en producción el backend se conecta con erp_veterinary_user, no con postgres",
       );
     }
   } catch {

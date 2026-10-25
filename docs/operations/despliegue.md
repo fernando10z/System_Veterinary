@@ -2,7 +2,7 @@
 
 ## Antes de exponer el sistema
 
-1. **Rol de aplicación.** El backend se conecta con `vet_app_user`, no con
+1. **Rol de aplicación.** El backend se conecta con `erp_veterinary_user`, no con
    `postgres`. Ese rol solo tiene `EXECUTE` sobre `app.*` (y `PUBLIC` no tiene
    `EXECUTE` sobre nada de `app`); sin acceso directo a las tablas, un SQL
    injection en un parámetro no alcanza a `core`. Con `NODE_ENV=production` el
@@ -18,7 +18,7 @@
    ```
 
    ```
-   DATABASE_URL=postgresql://vet_app_user:<clave>@host:5432/veterp
+   DATABASE_URL=postgresql://erp_veterinary_user:<clave>@host:5432/veterp
    ```
 
    La clave va dentro de una URL: usar hex o base64url.
@@ -76,7 +76,7 @@ Qué hace el compose:
 | Servicio | Papel |
 |---|---|
 | `postgres` | Base. Sin puerto publicado. |
-| `migrate` | Aplica `db/migrations/` (idempotentes) y fija la clave de `vet_app_user`. Corre y termina en cada `up`; el backend espera a que termine bien. No carga demo. |
+| `migrate` | Aplica `db/migrations/` (idempotentes) y fija la clave de `erp_veterinary_user`. Corre y termina en cada `up`; el backend espera a que termine bien. No carga demo. |
 | `redis` | Con `requirepass` y `maxmemory-policy noeviction`: guarda las sesiones y el contador de intentos de login, que no se pueden perder por falta de memoria. |
 | `minio` | Archivos clínicos. Versión fija (fork comunitario `pgsty/minio`: MinIO ya no publica imágenes en Docker Hub). |
 | `minio-init` | Crea el bucket y un usuario `STORAGE_ACCESS_KEY` con una política limitada a ese bucket. El backend no usa la credencial root. |
@@ -107,7 +107,7 @@ VET_APP_PASSWORD=… DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=veterp DB_PASSWORD=�
 DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=veterp DB_PASSWORD=… \
   bash db/scripts/crear-superadmin.sh
 
-# Backend (backend/.env con NODE_ENV=production, DATABASE_URL de vet_app_user,
+# Backend (backend/.env con NODE_ENV=production, DATABASE_URL de erp_veterinary_user,
 # REDIS_PASSWORD, STORAGE_PUBLIC_ENDPOINT=https://vet.tudominio.com,
 # COOKIE_SECURE=true, TRUST_PROXY=1, ENCRYPTION_KEY)
 cd backend && npm ci && npm run build
@@ -276,7 +276,7 @@ journalctl -u veterp-backup.service
 - `veterp-backup.timer`: todos los días a las 02:30.
 - `veterp-restore-test.timer`: los domingos, `restore-test.sh` restaura el
   último backup en una base temporal, comprueba que tenga los SPs, los permisos
-  y los grants de `vet_app_user`, y la borra. Un backup que nunca se restauró
+  y los grants de `erp_veterinary_user`, y la borra. Un backup que nunca se restauró
   es una hipótesis.
 
 Con cron en lugar de systemd:

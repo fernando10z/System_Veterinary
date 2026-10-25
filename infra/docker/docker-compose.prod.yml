@@ -7,7 +7,7 @@
 #   docker compose -f infra/docker/docker-compose.prod.yml up -d --build
 #
 # El servicio `migrate` aplica db/migrations/ en cada arranque (son
-# idempotentes) y fija la contraseña de vet_app_user desde VET_APP_PASSWORD.
+# idempotentes) y fija la contraseña de erp_veterinary_user desde VET_APP_PASSWORD.
 # NO carga datos de demostración. El primer super admin se crea una vez con:
 #
 #   docker compose -f infra/docker/docker-compose.prod.yml run --rm migrate \
@@ -186,9 +186,9 @@ services:
       NODE_ENV: production
       PORT: 3100
       TZ: America/Lima
-      # vet_app_user: solo EXECUTE sobre app.*. La contraseña debe ser segura
+      # erp_veterinary_user: solo EXECUTE sobre app.*. La contraseña debe ser segura
       # para una URL (hex o base64url): `openssl rand -hex 32`.
-      DATABASE_URL: postgresql://vet_app_user:${VET_APP_PASSWORD}@postgres:5432/veterp
+      DATABASE_URL: postgresql://erp_veterinary_user:${VET_APP_PASSWORD}@postgres:5432/veterp
       DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
       REDIS_HOST: redis
       REDIS_PORT: 6379

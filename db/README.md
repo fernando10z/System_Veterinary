@@ -11,7 +11,7 @@ PostgreSQL 16. Toda la lógica de negocio vive aquí, en stored procedures.
 | `internal` | Helpers privados reutilizados por los SPs | No |
 | `audit` | Reservado para auditoría separada | No |
 
-El rol `vet_app_user` (creado en `90_grants.sql`) solo tiene `USAGE` sobre `app` y
+El rol `erp_veterinary_user` (creado en `90_grants.sql`) solo tiene `USAGE` sobre `app` y
 `EXECUTE` sobre sus funciones. No puede leer una tabla de `core` directamente: si un
 SP no lo expone, el backend no lo ve.
 

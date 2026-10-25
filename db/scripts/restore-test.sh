@@ -52,9 +52,9 @@ SELECT
   (SELECT count(*) FROM core.permisos)                           || '|' ||
   (SELECT count(*) FROM core.users WHERE deleted_at IS NULL)     || '|' ||
   (SELECT count(*) FROM core.empresas)                           || '|' ||
-  has_function_privilege('vet_app_user',
+  has_function_privilege('erp_veterinary_user',
     'app.sp_auth_login(character varying, text)', 'EXECUTE')::text || '|' ||
-  has_table_privilege('vet_app_user', 'core.users', 'SELECT')::text;
+  has_table_privilege('erp_veterinary_user', 'core.users', 'SELECT')::text;
 SQL
 )"
 IFS='|' read -r N_SPS N_PERMISOS N_USERS N_EMPRESAS APP_EXEC APP_TABLAS <<<"$RES"
@@ -62,8 +62,8 @@ IFS='|' read -r N_SPS N_PERMISOS N_USERS N_EMPRESAS APP_EXEC APP_TABLAS <<<"$RES
 errores=()
 (( N_SPS >= 100 ))          || errores+=("solo $N_SPS funciones en app")
 (( N_PERMISOS > 0 ))        || errores+=("core.permisos vacía")
-[[ "$APP_EXEC" == "true" ]] || errores+=("vet_app_user no puede ejecutar app.sp_auth_login")
-[[ "$APP_TABLAS" == "false" ]] || errores+=("vet_app_user puede leer core.users directamente")
+[[ "$APP_EXEC" == "true" ]] || errores+=("erp_veterinary_user no puede ejecutar app.sp_auth_login")
+[[ "$APP_TABLAS" == "false" ]] || errores+=("erp_veterinary_user puede leer core.users directamente")
 
 if (( ${#errores[@]} )); then
   log "✗ restore-test: la base restaurada no pasa la comprobación: ${errores[*]}"

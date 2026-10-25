@@ -15,7 +15,7 @@
 #                        operación. Nunca en producción. Solo se acepta contra
 #                        una base cuyo nombre diga demo/dev/test/ci/snapshot,
 #                        salvo FORCE_DEMO=yes.
-#   VET_APP_PASSWORD     fija la contraseña de vet_app_user (el rol con el que
+#   VET_APP_PASSWORD     fija la contraseña de erp_veterinary_user (el rol con el que
 #                        se conecta el backend). Sin ella el rol queda con la
 #                        aleatoria que le puso 90_grants.sql, o con la que ya
 #                        tuviera.
@@ -82,7 +82,7 @@ if [[ -n "${VET_APP_PASSWORD:-}" ]]; then
   PSQL_DOCKER_ENV=(-e VET_APP_PASSWORD)
   run_psql > /dev/null <<'SQL'
 \getenv app_pwd VET_APP_PASSWORD
-ALTER ROLE vet_app_user WITH LOGIN PASSWORD :'app_pwd';
+ALTER ROLE erp_veterinary_user WITH LOGIN PASSWORD :'app_pwd';
 SQL
-  echo "✓ Contraseña de vet_app_user fijada desde VET_APP_PASSWORD."
+  echo "✓ Contraseña de erp_veterinary_user fijada desde VET_APP_PASSWORD."
 fi

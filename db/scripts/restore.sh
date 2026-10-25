@@ -13,7 +13,7 @@
 # tiene que existir (restore-test.sh crea la suya).
 #
 # El dump se restaura sin dueños ni permisos (--no-owner --no-privileges): al
-# terminar se vuelve a aplicar 90_grants.sql, que rehace vet_app_user, su
+# terminar se vuelve a aplicar 90_grants.sql, que rehace erp_veterinary_user, su
 # EXECUTE sobre app.* y la revocación a PUBLIC. Sin ese paso el backend no
 # podría llamar a ningún SP de la base restaurada. Con VET_APP_PASSWORD, además
 # se fija la contraseña del rol.
@@ -60,16 +60,16 @@ if [[ -n "${VET_APP_PASSWORD:-}" ]]; then
     docker exec -i -e VET_APP_PASSWORD ${PGPASSWORD:+-e PGPASSWORD} "$DB_CONTAINER" \
       psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 --quiet --no-psqlrc > /dev/null <<'SQL'
 \getenv app_pwd VET_APP_PASSWORD
-ALTER ROLE vet_app_user WITH LOGIN PASSWORD :'app_pwd';
+ALTER ROLE erp_veterinary_user WITH LOGIN PASSWORD :'app_pwd';
 SQL
   else
     psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
       --quiet --no-psqlrc > /dev/null <<'SQL'
 \getenv app_pwd VET_APP_PASSWORD
-ALTER ROLE vet_app_user WITH LOGIN PASSWORD :'app_pwd';
+ALTER ROLE erp_veterinary_user WITH LOGIN PASSWORD :'app_pwd';
 SQL
   fi
-  echo "  contraseña de vet_app_user fijada"
+  echo "  contraseña de erp_veterinary_user fijada"
 fi
 
 echo "✓ Restaurado $DUMP en $CONEXION_DESC"
