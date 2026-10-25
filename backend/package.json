@@ -14,7 +14,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:migrate": "bash ../db/scripts/apply-migrations.sh",
+    "db:migrate": "SEED_DEMO=1 bash ../db/scripts/apply-migrations.sh",
     "db:reset:dev": "ALLOW_RESET=yes bash ../db/scripts/reset-dev.sh"
   },
   "dependencies": {

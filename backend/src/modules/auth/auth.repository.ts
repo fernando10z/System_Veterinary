@@ -28,7 +28,8 @@ export class AuthRepository {
   }
 
   resetPassword(token: string, nueva: string) {
-    return this.sp.call("app.sp_auth_reset_password", [token, nueva]);
+    return this.sp.call<{ updated: boolean; user_id?: string }>(
+      "app.sp_auth_reset_password", [token, nueva]);
   }
 
   portalLogin(documento: string, password: string) {

@@ -25,48 +25,88 @@ AS $$
 DECLARE
   v_id        UUID;
   v_emp       UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+  v_cliente   UUID := (p_payload->>'cliente_id')::uuid;
   v_monto     NUMERIC(14,2) := (p_payload->>'monto')::numeric;
+  v_metodo    core.metodo_pago := COALESCE(NULLIF(p_payload->>'metodo','')::core.metodo_pago, 'efectivo');
+  v_ref       TEXT := NULLIF(trim(p_payload->>'referencia'), '');
+  v_idem      UUID := NULLIF(p_payload->>'idempotency_key','')::uuid;
   v_caja      UUID;
+  v_caja_pedida UUID := NULLIF(p_payload->>'caja_id','')::uuid;
   v_aplic     JSONB := COALESCE(p_payload->'aplicaciones', '[]'::jsonb);
   v_item      JSONB;
   v_suma      NUMERIC(14,2) := 0;
-  v_saldo     NUMERIC(14,2);
+  v_aplicar   NUMERIC(14,2);
   v_restante  NUMERIC(14,2);
   v_comp      RECORD;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'pagos:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['cliente_id','monto']);
 
+  -- Idempotencia: el mismo intento no cobra dos veces (ver sp_comprobante_emitir).
+  IF v_idem IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('pago:' || v_idem::text, 0));
+    SELECT id INTO v_id FROM core.pagos WHERE empresa_id = v_emp AND idempotency_key = v_idem;
+    IF v_id IS NOT NULL THEN
+      RETURN jsonb_build_object('ok', true, 'meta', jsonb_build_object('repetido', true),
+        'data', (SELECT jsonb_build_object('id', p.id, 'monto', p.monto, 'caja_id', p.caja_id)
+                   FROM core.pagos p WHERE p.id = v_id));
+    END IF;
+  END IF;
+
   IF NOT EXISTS (SELECT 1 FROM core.clientes
-                  WHERE id = (p_payload->>'cliente_id')::uuid AND deleted_at IS NULL
+                  WHERE id = v_cliente AND deleted_at IS NULL
                     AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Cliente no encontrado','cliente_id'));
   END IF;
 
-  IF v_monto <= 0 THEN
+  IF v_monto IS NULL OR v_monto <= 0 THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('VALIDATION_ERROR','El monto debe ser mayor a cero','monto'));
   END IF;
 
-  -- Caja abierta del usuario (si la hay): el cobro entra al arqueo del turno
-  SELECT id INTO v_caja FROM core.cajas
-   WHERE empresa_id = v_emp AND user_apertura_id = p_user_id AND estado = 'abierta'
-   LIMIT 1;
-  -- Una caja de otra empresa no sirve: se ignora si no es de la nuestra.
-  IF NULLIF(p_payload->>'caja_id','') IS NOT NULL
-     AND EXISTS (SELECT 1 FROM core.cajas
-                  WHERE id = (p_payload->>'caja_id')::uuid
-                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
-    v_caja := (p_payload->>'caja_id')::uuid;
+  -- Lo que entra al banco se concilia por el número de operación. Sin él, un
+  -- Yape "registrado" no se puede cruzar con el extracto, y el mismo voucher
+  -- puede cargarse dos veces sin que nadie lo note.
+  IF v_metodo IN ('yape','plin','transferencia','deposito') AND v_ref IS NULL THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('VALIDATION_ERROR',
+        'Indica el número de operación del ' || v_metodo::text, 'referencia'));
+  END IF;
+
+  IF v_ref IS NOT NULL AND v_metodo IN ('yape','plin','transferencia','deposito')
+     AND EXISTS (SELECT 1 FROM core.pagos
+                  WHERE empresa_id = v_emp AND metodo = v_metodo AND referencia = v_ref
+                    AND anulado_at IS NULL) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('CONFLICT',
+        format('La operación %s de %s ya está registrada en otro cobro', v_ref, v_metodo), 'referencia'));
+  END IF;
+
+  -- Caja: la indicada (de la empresa y abierta) o la abierta del cajero. Se
+  -- toma con FOR SHARE: muchos cobros pueden entrar a la vez, pero el cierre
+  -- (FOR UPDATE) espera a que terminen y no se le escapa ninguno del arqueo.
+  IF v_caja_pedida IS NOT NULL THEN
+    SELECT id INTO v_caja FROM core.cajas
+     WHERE id = v_caja_pedida AND empresa_id = v_emp AND estado = 'abierta'
+     FOR SHARE;
+    IF v_caja IS NULL THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('BUSINESS_RULE',
+          'La caja indicada no existe o ya está cerrada','caja_id'));
+    END IF;
+  ELSE
+    SELECT id INTO v_caja FROM core.cajas
+     WHERE empresa_id = v_emp AND user_apertura_id = p_user_id AND estado = 'abierta'
+     LIMIT 1
+     FOR SHARE;
   END IF;
 
   -- El efectivo SÍ exige caja abierta. Un cobro en efectivo sin caja no genera
   -- movimiento y por tanto no aparece en ningún arqueo: el billete entra al
   -- cajón y no hay nada contra qué cuadrarlo. Los medios que van al banco
-  -- (tarjeta, transferencia, yape…) no necesitan caja.
-  IF COALESCE((p_payload->>'metodo')::core.metodo_pago, 'efectivo') = 'efectivo'
-     AND v_caja IS NULL THEN
+  -- (tarjeta, transferencia, yape…) no la necesitan.
+  IF v_metodo = 'efectivo' AND v_caja IS NULL THEN
     RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(
       'BUSINESS_RULE',
       'Para cobrar en efectivo necesitas una caja abierta', 'caja_id'));
@@ -74,39 +114,47 @@ BEGIN
 
   INSERT INTO core.pagos (
     empresa_id, cliente_id, caja_id, numero, metodo, monto, moneda,
-    referencia, fecha_pago, observaciones, created_by
+    referencia, fecha_pago, observaciones, idempotency_key, created_by
   ) VALUES (
-    v_emp, (p_payload->>'cliente_id')::uuid, v_caja,
+    v_emp, v_cliente, v_caja,
     internal.siguiente_numero(v_emp, 'PAG', 6),
-    COALESCE((p_payload->>'metodo')::core.metodo_pago, 'efectivo'),
-    v_monto,
+    v_metodo, v_monto,
     COALESCE((p_payload->>'moneda')::core.moneda_codigo, 'PEN'),
-    p_payload->>'referencia',
+    v_ref,
     COALESCE(NULLIF(p_payload->>'fecha_pago','')::timestamptz, now()),
-    p_payload->>'observaciones', p_user_id
+    p_payload->>'observaciones', v_idem, p_user_id
   ) RETURNING id INTO v_id;
 
-  -- Aplicaciones explícitas
   IF jsonb_array_length(v_aplic) > 0 THEN
+    -- Aplicaciones explícitas. Cada comprobante se bloquea antes de leer su
+    -- saldo: dos cobros simultáneos a la misma boleta se hacen en fila, y el
+    -- segundo ve el saldo que dejó el primero.
     FOR v_item IN SELECT * FROM jsonb_array_elements(v_aplic) LOOP
-      SELECT saldo_pendiente INTO v_saldo FROM core.comprobantes
-       WHERE id = (v_item->>'comprobante_id')::uuid AND deleted_at IS NULL
-         AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id);
-
-      IF v_saldo IS NULL THEN
-        RAISE EXCEPTION 'Comprobante no encontrado' USING ERRCODE = 'P0001';
+      v_aplicar := (v_item->>'monto')::numeric;
+      IF v_aplicar IS NULL OR v_aplicar <= 0 THEN
+        RAISE EXCEPTION 'El monto aplicado debe ser mayor a cero' USING ERRCODE = 'P0001';
       END IF;
 
-      IF (v_item->>'monto')::numeric > v_saldo THEN
-        RAISE EXCEPTION 'El monto aplicado (%) supera el saldo del comprobante (%)',
-          (v_item->>'monto')::numeric, v_saldo USING ERRCODE = 'P0001';
+      SELECT id, saldo_pendiente, numero_completo INTO v_comp FROM core.comprobantes
+       WHERE id = (v_item->>'comprobante_id')::uuid AND deleted_at IS NULL
+         AND empresa_id = v_emp AND cliente_id = v_cliente
+         AND anulado_at IS NULL AND tipo IN ('factura','boleta','nota_venta')
+       FOR UPDATE;
+
+      IF v_comp.id IS NULL THEN
+        RAISE EXCEPTION 'Comprobante no encontrado para este cliente' USING ERRCODE = 'P0002';
+      END IF;
+
+      IF v_aplicar > v_comp.saldo_pendiente THEN
+        RAISE EXCEPTION 'El monto aplicado (%) supera el saldo de % (%)',
+          v_aplicar, v_comp.numero_completo, v_comp.saldo_pendiente USING ERRCODE = 'P0001';
       END IF;
 
       INSERT INTO core.pago_aplicaciones (pago_id, comprobante_id, monto_aplicado)
-      VALUES (v_id, (v_item->>'comprobante_id')::uuid, (v_item->>'monto')::numeric);
+      VALUES (v_id, v_comp.id, v_aplicar);
 
-      PERFORM internal.recalcular_saldo_comprobante((v_item->>'comprobante_id')::uuid);
-      v_suma := v_suma + (v_item->>'monto')::numeric;
+      PERFORM internal.recalcular_saldo_comprobante(v_comp.id);
+      v_suma := v_suma + v_aplicar;
     END LOOP;
 
     IF v_suma > v_monto THEN
@@ -115,19 +163,23 @@ BEGIN
     END IF;
   ELSE
     -- Sin detalle: se imputa a los comprobantes más antiguos hasta agotarlo.
+    -- Solo documentos que son deuda: una nota de crédito nunca lo es.
     v_restante := v_monto;
     FOR v_comp IN
       SELECT id, saldo_pendiente FROM core.comprobantes
-       WHERE empresa_id = v_emp AND cliente_id = (p_payload->>'cliente_id')::uuid
+       WHERE empresa_id = v_emp AND cliente_id = v_cliente
          AND deleted_at IS NULL AND anulado_at IS NULL AND saldo_pendiente > 0
-       ORDER BY fecha_emision
+         AND tipo IN ('factura','boleta','nota_venta')
+       ORDER BY fecha_emision, numero
+       FOR UPDATE
     LOOP
       EXIT WHEN v_restante <= 0;
+      v_aplicar := LEAST(v_restante, v_comp.saldo_pendiente);
       INSERT INTO core.pago_aplicaciones (pago_id, comprobante_id, monto_aplicado)
-      VALUES (v_id, v_comp.id, LEAST(v_restante, v_comp.saldo_pendiente));
+      VALUES (v_id, v_comp.id, v_aplicar);
 
       PERFORM internal.recalcular_saldo_comprobante(v_comp.id);
-      v_restante := v_restante - LEAST(v_restante, v_comp.saldo_pendiente);
+      v_restante := v_restante - v_aplicar;
     END LOOP;
   END IF;
 
@@ -135,9 +187,8 @@ BEGIN
     INSERT INTO core.movimientos_caja (
       empresa_id, caja_id, tipo, metodo, concepto, monto, pago_id, created_by)
     VALUES (
-      v_emp, v_caja, 'ingreso',
-      COALESCE((p_payload->>'metodo')::core.metodo_pago, 'efectivo'),
-      'Cobro a cliente', v_monto, v_id, p_user_id);
+      v_emp, v_caja, 'ingreso', v_metodo,
+      'Cobro a cliente' || COALESCE(' · op. ' || v_ref, ''), v_monto, v_id, p_user_id);
   END IF;
 
   PERFORM internal.registrar_auditoria(
@@ -151,6 +202,14 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+-- -----------------------------------------------------------------------------
+-- app.sp_pago_anular
+--
+-- El cobro se anula una sola vez (el pago queda bloqueado mientras tanto: dos
+-- anulaciones simultáneas ya no generan dos egresos). El dinero sale de la
+-- caja donde entró si sigue abierta; si ya se cerró, de la caja abierta de
+-- quien anula, porque es ahí donde está el billete que se devuelve.
+-- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.sp_pago_anular(
   p_user_id        UUID,
   p_empresa_id     UUID,
@@ -166,13 +225,15 @@ AS $$
 DECLARE
   v_pago RECORD;
   v_comp UUID;
+  v_caja UUID;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'pagos:anular');
 
   SELECT * INTO v_pago FROM core.pagos
    WHERE id = p_id
      AND internal.es_de_empresa(p_user_id, p_is_super_admin,
-           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id)
+   FOR UPDATE;
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Pago no encontrado'));
@@ -183,26 +244,52 @@ BEGIN
       'error', internal.error_jsonb('BUSINESS_RULE','El pago ya está anulado'));
   END IF;
 
+  IF COALESCE(trim(p_motivo), '') = '' THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('VALIDATION_ERROR','Indica el motivo de la anulación','motivo'));
+  END IF;
+
+  -- ¿De qué caja sale la devolución?
+  IF v_pago.caja_id IS NOT NULL THEN
+    SELECT id INTO v_caja FROM core.cajas
+     WHERE id = v_pago.caja_id AND estado = 'abierta' FOR SHARE;
+    IF v_caja IS NULL THEN
+      SELECT id INTO v_caja FROM core.cajas
+       WHERE empresa_id = v_pago.empresa_id AND user_apertura_id = p_user_id
+         AND estado = 'abierta'
+       LIMIT 1 FOR SHARE;
+    END IF;
+    IF v_caja IS NULL AND v_pago.metodo = 'efectivo' THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('BUSINESS_RULE',
+          'La caja de ese cobro ya se cerró. Abre tu caja para registrar la devolución del efectivo.'));
+    END IF;
+  END IF;
+
   UPDATE core.pagos
      SET anulado_at = now(),
-         observaciones = COALESCE(observaciones || ' | ', '') || 'ANULADO: ' || COALESCE(p_motivo,'')
+         observaciones = COALESCE(observaciones || ' | ', '') || 'ANULADO: ' || p_motivo
    WHERE id = p_id;
 
-  -- Los saldos de los comprobantes vuelven a subir
-  FOR v_comp IN SELECT comprobante_id FROM core.pago_aplicaciones WHERE pago_id = p_id LOOP
+  -- Los saldos de los comprobantes vuelven a subir.
+  FOR v_comp IN
+    SELECT c.id FROM core.comprobantes c
+     WHERE c.id IN (SELECT comprobante_id FROM core.pago_aplicaciones WHERE pago_id = p_id)
+     ORDER BY c.id FOR UPDATE
+  LOOP
     PERFORM internal.recalcular_saldo_comprobante(v_comp);
   END LOOP;
 
-  IF v_pago.caja_id IS NOT NULL THEN
+  IF v_caja IS NOT NULL THEN
     INSERT INTO core.movimientos_caja (
       empresa_id, caja_id, tipo, metodo, concepto, monto, pago_id, created_by)
-    VALUES (v_pago.empresa_id, v_pago.caja_id, 'egreso', v_pago.metodo,
+    VALUES (v_pago.empresa_id, v_caja, 'egreso', v_pago.metodo,
             'Anulación de cobro ' || COALESCE(v_pago.numero,''), v_pago.monto, p_id, p_user_id);
   END IF;
 
   PERFORM internal.registrar_auditoria(
     p_user_id, v_pago.empresa_id, 'anular', 'pagos', p_id, NULL,
-    jsonb_build_object('motivo', p_motivo));
+    jsonb_build_object('motivo', p_motivo, 'caja_devolucion', v_caja));
 
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', p_id, 'anulado', true));
 
@@ -344,17 +431,32 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'caja:operar');
   PERFORM internal.validar_payload(p_payload, ARRAY['tipo','concepto','monto']);
 
-  IF v_caja IS NOT NULL
-     AND NOT EXISTS (SELECT 1 FROM core.cajas
-                      WHERE id = v_caja
-                        AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+  IF COALESCE(trim(p_payload->>'concepto'), '') = '' THEN
     RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('NOT_FOUND','Caja no encontrada','caja_id'));
+      'error', internal.error_jsonb('VALIDATION_ERROR','Indica el concepto del movimiento','concepto'));
   END IF;
 
-  IF v_caja IS NULL THEN
+  IF COALESCE((p_payload->>'monto')::numeric, 0) <= 0 THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('VALIDATION_ERROR','El monto debe ser mayor a cero','monto'));
+  END IF;
+
+  -- Solo a una caja abierta: un movimiento en una caja cerrada cambiaría un
+  -- arqueo que ya se firmó. FOR SHARE, igual que el cobro, para que el cierre
+  -- espere a este movimiento en vez de dejarlo fuera.
+  IF v_caja IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM core.cajas
+                    WHERE id = v_caja
+                      AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('NOT_FOUND','Caja no encontrada','caja_id'));
+    END IF;
     SELECT id INTO v_caja FROM core.cajas
-     WHERE empresa_id = v_emp AND user_apertura_id = p_user_id AND estado = 'abierta' LIMIT 1;
+     WHERE id = v_caja AND estado = 'abierta' FOR SHARE;
+  ELSE
+    SELECT id INTO v_caja FROM core.cajas
+     WHERE empresa_id = v_emp AND user_apertura_id = p_user_id AND estado = 'abierta'
+     LIMIT 1 FOR SHARE;
   END IF;
 
   IF v_caja IS NULL THEN
@@ -370,6 +472,9 @@ BEGIN
     COALESCE((p_payload->>'metodo')::core.metodo_pago, 'efectivo'),
     p_payload->>'concepto', (p_payload->>'monto')::numeric, p_user_id)
   RETURNING id INTO v_id;
+
+  PERFORM internal.registrar_auditoria(
+    p_user_id, v_emp, 'movimiento', 'cajas', v_caja, NULL, p_payload);
 
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', v_id));
 
@@ -406,10 +511,14 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'caja:operar');
 
+  -- FOR UPDATE: espera a que terminen los cobros que están entrando ahora
+  -- (tienen la caja con FOR SHARE) y bloquea los que lleguen después, que
+  -- encontrarán la caja cerrada. Así ningún cobro queda fuera del arqueo.
   SELECT * INTO v_caja FROM core.cajas
    WHERE id = p_id
      AND internal.es_de_empresa(p_user_id, p_is_super_admin,
-           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id);
+           internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id)
+   FOR UPDATE;
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Caja no encontrada'));
@@ -418,6 +527,12 @@ BEGIN
   IF v_caja.estado <> 'abierta' THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('BUSINESS_RULE','La caja ya fue cerrada'));
+  END IF;
+
+  IF p_monto_contado IS NULL OR p_monto_contado < 0 THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('VALIDATION_ERROR',
+        'Indica el efectivo contado en la caja','monto_contado'));
   END IF;
 
   SELECT
@@ -435,6 +550,14 @@ BEGIN
   -- Solo el efectivo debe estar físicamente en la caja al cerrar.
   v_esperado := v_caja.monto_apertura + v_efectivo;
   v_dif      := COALESCE(p_monto_contado, 0) - v_esperado;
+
+  -- Un descuadre sin explicación es lo que después nadie sabe reconstruir.
+  IF v_dif <> 0 AND COALESCE(trim(p_observaciones), '') = '' THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('VALIDATION_ERROR',
+        'El contado no coincide con lo esperado: explica la diferencia en las observaciones',
+        'observaciones'));
+  END IF;
 
   UPDATE core.cajas SET
     user_cierre_id = p_user_id,

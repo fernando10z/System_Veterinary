@@ -1,3 +1,4 @@
+import { Vaciable } from "../../../common/decorators/vaciable.decorator";
 import {
   IsBoolean, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID,
   MaxLength, Min,
@@ -10,12 +11,12 @@ export class ActualizarMascotaDto {
   @IsOptional() @IsIn(["macho", "hembra", "desconocido"]) sexo?: string;
   @IsOptional() @IsString() @MaxLength(80) color?: string;
   @IsOptional() @IsString() senias_particulares?: string;
-  @IsOptional() @IsDateString() fecha_nacimiento?: string;
+  @Vaciable() @IsDateString() fecha_nacimiento?: string;
   @IsOptional() @IsInt() @Min(0) edad_aproximada_meses?: number;
   @IsOptional() @IsNumber() @Min(0) peso_kg?: number;
   @IsOptional() @IsIn(["toy", "pequenio", "mediano", "grande", "gigante"]) tamanio?: string;
   @IsOptional() @IsBoolean() esterilizado?: boolean;
-  @IsOptional() @IsDateString() fecha_esterilizacion?: string;
+  @Vaciable() @IsDateString() fecha_esterilizacion?: string;
   @IsOptional() @IsString() @MaxLength(40) microchip?: string;
   @IsOptional() @IsString() @MaxLength(40) num_placa?: string;
   @IsOptional() @IsString() foto_url?: string;
@@ -23,5 +24,5 @@ export class ActualizarMascotaDto {
   @IsOptional() @IsString() condiciones_cronicas?: string;
   @IsOptional() @IsString() observaciones?: string;
   @IsOptional() @IsIn(["activo", "inactivo", "fallecido", "extraviado"]) estado?: string;
-  @IsOptional() @IsDateString() fecha_fallecimiento?: string;
+  @Vaciable() @IsDateString() fecha_fallecimiento?: string;
 }

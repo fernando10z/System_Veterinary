@@ -53,14 +53,14 @@
               <td>
                 <div class="stack">
                   <strong>{{ s.nombre }}</strong>
-                  <small class="muted mono">{{ s.codigo }}</small>
+                  <small class="muted codigo">{{ s.codigo }}</small>
                 </div>
               </td>
               <td><span class="tag">{{ capitalizar(s.tipo) }}</span></td>
-              <td class="num mono">{{ fmtSoles(s.precio) }}</td>
-              <td class="num mono muted">{{ fmtSoles(s.costo_estimado) }}</td>
-              <td class="num mono">{{ s.duracion_min }}′</td>
-              <td class="num mono">{{ s.usos_mes }}</td>
+              <td class="num cifra">{{ fmtSoles(s.precio) }}</td>
+              <td class="num cifra muted">{{ fmtSoles(s.costo_estimado) }}</td>
+              <td class="num cifra">{{ s.duracion_min }}′</td>
+              <td class="num cifra">{{ s.usos_mes }}</td>
               <td>
                 <span :class="['estado-pill', s.estado === 'activo' ? 'ok' : 'neutral']">
                   <span class="dot"></span>{{ capitalizar(s.estado) }}
@@ -68,8 +68,8 @@
               </td>
               <td class="acciones-col">
                 <div class="row-actions">
-                  <button class="btn mini" title="Editar" @click="abrirServicio(s)"><Pencil :size="13" /></button>
-                  <button class="btn mini" title="Eliminar" @click="eliminarServicio(s)"><Trash2 :size="13" /></button>
+                  <button class="btn mini" title="Editar" @click="abrirServicio(s)" aria-label="Editar"><Pencil :size="13" /></button>
+                  <button class="btn mini" title="Eliminar" @click="eliminarServicio(s)" aria-label="Eliminar"><Trash2 :size="13" /></button>
                 </div>
               </td>
             </tr>
@@ -99,7 +99,7 @@
               <strong>{{ e.nombre }}</strong>
               <small class="muted">{{ e.total_pacientes }} pacientes · {{ e.razas.length }} razas</small>
             </div>
-            <button class="btn mini" @click="abrirEspecie(e)"><Pencil :size="13" /></button>
+            <button class="btn mini" aria-label="Editar" title="Editar" @click="abrirEspecie(e)"><Pencil :size="13" /></button>
           </div>
           <div class="razas">
             <span v-for="r in e.razas" :key="r.id" class="tag raza" @click="abrirRaza(r, e)">
@@ -131,14 +131,14 @@
             <tr v-for="c in consultorios" :key="c.id">
               <td><strong>{{ c.nombre }}</strong></td>
               <td><span class="tag">{{ capitalizar(c.tipo) }}</span></td>
-              <td class="num mono">{{ c.capacidad }}</td>
+              <td class="num cifra">{{ c.capacidad }}</td>
               <td>
                 <span :class="['estado-pill', c.estado === 'activo' ? 'ok' : 'neutral']">
                   <span class="dot"></span>{{ capitalizar(c.estado) }}
                 </span>
               </td>
               <td class="acciones-col">
-                <button class="btn mini" @click="abrirConsultorio(c)"><Pencil :size="13" /></button>
+                <button class="btn mini" aria-label="Editar" title="Editar" @click="abrirConsultorio(c)"><Pencil :size="13" /></button>
               </td>
             </tr>
           </tbody>
@@ -202,17 +202,17 @@
             <tr v-for="e in esquemas" :key="e.id">
               <td><strong>{{ e.nombre }}</strong></td>
               <td>{{ e.especie }}</td>
-              <td class="num mono">{{ e.edad_inicio_semanas ? `${e.edad_inicio_semanas} sem` : "—" }}</td>
-              <td class="num mono">{{ e.dosis_totales }}</td>
-              <td class="num mono">{{ e.intervalo_dias ? `${e.intervalo_dias} d` : "—" }}</td>
-              <td class="num mono">{{ e.revacunacion_meses ? `${e.revacunacion_meses} m` : "—" }}</td>
+              <td class="num cifra">{{ e.edad_inicio_semanas ? `${e.edad_inicio_semanas} sem` : "—" }}</td>
+              <td class="num cifra">{{ e.dosis_totales }}</td>
+              <td class="num cifra">{{ e.intervalo_dias ? `${e.intervalo_dias} d` : "—" }}</td>
+              <td class="num cifra">{{ e.revacunacion_meses ? `${e.revacunacion_meses} m` : "—" }}</td>
               <td>
                 <span :class="['estado-pill', e.obligatoria ? 'danger' : 'neutral']">
                   <span class="dot"></span>{{ e.obligatoria ? "Sí" : "No" }}
                 </span>
               </td>
               <td class="acciones-col">
-                <button class="btn mini" @click="abrirEsquema(e)"><Pencil :size="13" /></button>
+                <button class="btn mini" aria-label="Editar" title="Editar" @click="abrirEsquema(e)"><Pencil :size="13" /></button>
               </td>
             </tr>
           </tbody>
@@ -240,14 +240,14 @@
             <tr v-for="e in especialidades" :key="e.id">
               <td><strong>{{ e.nombre }}</strong></td>
               <td class="muted">{{ e.descripcion || "—" }}</td>
-              <td class="num mono">{{ e.veterinarios }}</td>
+              <td class="num cifra">{{ e.veterinarios }}</td>
               <td>
                 <span :class="['estado-pill', e.estado === 'activo' ? 'ok' : 'neutral']">
                   <span class="dot"></span>{{ capitalizar(e.estado) }}
                 </span>
               </td>
               <td class="acciones-col">
-                <button class="btn mini" @click="abrirEspecialidad(e)"><Pencil :size="13" /></button>
+                <button class="btn mini" aria-label="Editar" title="Editar" @click="abrirEspecialidad(e)"><Pencil :size="13" /></button>
               </td>
             </tr>
           </tbody>
@@ -256,7 +256,7 @@
     </section>
 
     <!-- ---------- Modal genérico de catálogo ---------- -->
-    <div v-if="modal" class="modal-back" @click="modal = null">
+    <div v-if="modal" class="modal-back" v-dialogo="() => (modal = null)">
       <div class="modal modal-wide" @click.stop>
         <div class="m-head"><h3>{{ modal.titulo }}</h3></div>
         <div class="m-body">
@@ -593,6 +593,8 @@ async function cargar() {
     especialidades.value = especialidad.data ?? [];
     categorias.value = cat.data ?? [];
     armarSemana(hor.data ?? []);
+  } catch (e) {
+    notify.toast(`No se pudieron cargar los catálogos: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

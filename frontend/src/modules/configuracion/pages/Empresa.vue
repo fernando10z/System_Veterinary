@@ -44,49 +44,49 @@
         <div class="module-panel-body">
           <div class="form-grid">
             <div class="field">
-              <label>RUC</label>
-              <input v-model.trim="f.ruc" type="text" disabled />
+              <label for="empresa-ruc">RUC</label>
+              <input id="empresa-ruc" v-model.trim="f.ruc" type="text" disabled />
               <small class="muted">El RUC identifica a la empresa y no se edita aquí.</small>
             </div>
             <div class="field">
-              <label>Razón social</label>
-              <input v-model.trim="f.razon_social" type="text" />
+              <label for="empresa-razon-social">Razón social</label>
+              <input id="empresa-razon-social" v-model.trim="f.razon_social" type="text" />
             </div>
             <div class="field">
-              <label>Nombre comercial</label>
-              <input v-model.trim="f.nombre_comercial" type="text" />
+              <label for="empresa-nombre-comercial">Nombre comercial</label>
+              <input id="empresa-nombre-comercial" v-model.trim="f.nombre_comercial" type="text" />
             </div>
             <div class="field">
-              <label>Teléfono</label>
-              <input v-model.trim="f.telefono" type="tel" />
+              <label for="empresa-telefono">Teléfono</label>
+              <input id="empresa-telefono" v-model.trim="f.telefono" type="tel" />
             </div>
             <div class="field">
-              <label>Correo</label>
-              <input v-model.trim="f.correo" type="email" />
+              <label for="empresa-correo">Correo</label>
+              <input id="empresa-correo" v-model.trim="f.correo" type="email" />
             </div>
             <div class="field">
-              <label>Ubigeo</label>
-              <input v-model.trim="f.ubigeo" type="text" maxlength="6" />
+              <label for="empresa-ubigeo">Ubigeo</label>
+              <input id="empresa-ubigeo" v-model.trim="f.ubigeo" type="text" maxlength="6" />
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Dirección fiscal</label>
-              <input v-model.trim="f.direccion_fiscal" type="text" />
+              <label for="empresa-direccion-fiscal">Dirección fiscal</label>
+              <input id="empresa-direccion-fiscal" v-model.trim="f.direccion_fiscal" type="text" />
             </div>
             <div class="field">
-              <label>Distrito</label>
-              <input v-model.trim="f.distrito" type="text" maxlength="30" placeholder="MIRAFLORES" />
+              <label for="empresa-distrito">Distrito</label>
+              <input id="empresa-distrito" v-model.trim="f.distrito" type="text" maxlength="30" placeholder="MIRAFLORES" />
             </div>
             <div class="field">
-              <label>Provincia</label>
-              <input v-model.trim="f.provincia" type="text" maxlength="30" placeholder="LIMA" />
+              <label for="empresa-provincia">Provincia</label>
+              <input id="empresa-provincia" v-model.trim="f.provincia" type="text" maxlength="30" placeholder="LIMA" />
             </div>
             <div class="field">
-              <label>Departamento</label>
-              <input v-model.trim="f.departamento" type="text" maxlength="30" placeholder="LIMA" />
+              <label for="empresa-departamento">Departamento</label>
+              <input id="empresa-departamento" v-model.trim="f.departamento" type="text" maxlength="30" placeholder="LIMA" />
             </div>
             <div class="field">
-              <label>Urbanización</label>
-              <input v-model.trim="f.urbanizacion" type="text" maxlength="120" />
+              <label for="empresa-urbanizacion">Urbanización</label>
+              <input id="empresa-urbanizacion" v-model.trim="f.urbanizacion" type="text" maxlength="120" />
             </div>
             <div class="field" style="grid-column: 1 / -1">
               <small class="muted">
@@ -95,8 +95,8 @@
               </small>
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Logo (URL)</label>
-              <input v-model.trim="f.logo_url" type="text" placeholder="https://…" />
+              <label for="empresa-logo-url">Logo (URL)</label>
+              <input id="empresa-logo-url" v-model.trim="f.logo_url" type="text" placeholder="https://…" />
             </div>
           </div>
         </div>
@@ -109,24 +109,24 @@
         <div class="module-panel-body">
           <div class="form-grid">
             <div class="field">
-              <label>Serie de factura</label>
-              <input v-model.trim="f.serie_factura_default" type="text" placeholder="F001" />
+              <label for="empresa-serie-factura-default">Serie de factura</label>
+              <input id="empresa-serie-factura-default" v-model.trim="f.serie_factura_default" type="text" placeholder="F001" />
             </div>
             <div class="field">
-              <label>Serie de boleta</label>
-              <input v-model.trim="f.serie_boleta_default" type="text" placeholder="B001" />
+              <label for="empresa-serie-boleta-default">Serie de boleta</label>
+              <input id="empresa-serie-boleta-default" v-model.trim="f.serie_boleta_default" type="text" placeholder="B001" />
             </div>
             <div class="field">
-              <label>Serie de nota de venta</label>
-              <input v-model.trim="f.serie_nota_venta_default" type="text" placeholder="NV01" />
+              <label for="empresa-serie-nota-venta-default">Serie de nota de venta</label>
+              <input id="empresa-serie-nota-venta-default" v-model.trim="f.serie_nota_venta_default" type="text" placeholder="NV01" />
             </div>
             <div class="field">
-              <label>Serie de nota de crédito</label>
-              <input v-model.trim="f.serie_nota_credito_default" type="text" placeholder="BC01" />
+              <label for="empresa-serie-nota-credito-default">Serie de nota de crédito</label>
+              <input id="empresa-serie-nota-credito-default" v-model.trim="f.serie_nota_credito_default" type="text" placeholder="BC01" />
             </div>
             <div class="field">
-              <label>Tasa de IGV</label>
-              <input v-model.number="f.igv_tasa" type="number" step="0.0001" min="0" max="1" />
+              <label for="empresa-igv-tasa">Tasa de IGV</label>
+              <input id="empresa-igv-tasa" v-model.number="f.igv_tasa" type="number" step="0.0001" min="0" max="1" />
               <small class="muted">0.18 equivale al 18%.</small>
             </div>
           </div>
@@ -146,31 +146,31 @@
 
           <div class="form-grid">
             <div class="field">
-              <label>Proveedor</label>
-              <select v-model="f.pse_proveedor">
+              <label for="empresa-pse-proveedor">Proveedor</label>
+              <select id="empresa-pse-proveedor" v-model="f.pse_proveedor">
                 <option value="the_factory_hka">The Factory HKA</option>
               </select>
             </div>
             <div class="field">
-              <label>RUC emisor</label>
-              <input v-model.trim="f.pse_ruc" type="text" maxlength="11" :placeholder="f.ruc" />
+              <label for="empresa-pse-ruc">RUC emisor</label>
+              <input id="empresa-pse-ruc" v-model.trim="f.pse_ruc" type="text" maxlength="11" :placeholder="f.ruc" />
               <small class="muted">Sólo si difiere del RUC de la empresa (homologación).</small>
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Endpoint del PSE/OSE</label>
-              <input
+              <label for="empresa-pse-endpoint">Endpoint del PSE/OSE</label>
+              <input id="empresa-pse-endpoint"
                 v-model.trim="f.pse_endpoint"
                 type="text"
                 placeholder="https://demo-api.thefactoryhka.com.pe/ServiceClients.svc"
               />
             </div>
             <div class="field">
-              <label>Usuario</label>
-              <input v-model.trim="f.pse_usuario" type="text" autocomplete="off" />
+              <label for="empresa-pse-usuario">Usuario</label>
+              <input id="empresa-pse-usuario" v-model.trim="f.pse_usuario" type="text" autocomplete="off" />
             </div>
             <div class="field">
-              <label>Contraseña</label>
-              <input
+              <label for="empresa-pse-password">Contraseña</label>
+              <input id="empresa-pse-password"
                 v-model="f.pse_password"
                 type="password"
                 autocomplete="new-password"
@@ -189,17 +189,17 @@
         <div class="module-panel-body">
           <div class="form-grid">
             <div class="field">
-              <label>Consultorios simultáneos</label>
-              <input v-model.number="f.aforo_consultorios" type="number" min="1" />
+              <label for="empresa-aforo-consultorios">Consultorios simultáneos</label>
+              <input id="empresa-aforo-consultorios" v-model.number="f.aforo_consultorios" type="number" min="1" />
             </div>
             <div class="field">
-              <label>Duración por defecto de cita (min)</label>
-              <input v-model.number="f.duracion_cita_min" type="number" min="5" step="5" />
+              <label for="empresa-duracion-cita-min">Duración por defecto de cita (min)</label>
+              <input id="empresa-duracion-cita-min" v-model.number="f.duracion_cita_min" type="number" min="5" step="5" />
               <small class="muted">Define el tamaño de los huecos de la agenda.</small>
             </div>
             <div class="field">
-              <label>Estado de la empresa</label>
-              <select v-model="f.estado" :disabled="!esSuperAdmin">
+              <label for="empresa-estado">Estado de la empresa</label>
+              <select id="empresa-estado" v-model="f.estado" :disabled="!esSuperAdmin">
                 <option value="activa">Activa</option>
                 <option value="suspendida">Suspendida</option>
                 <option value="cerrada">Cerrada</option>
@@ -230,9 +230,9 @@
                     <small class="muted">{{ s.direccion_fiscal }}</small>
                   </div>
                 </td>
-                <td class="mono">{{ s.ruc }}</td>
-                <td class="num mono">{{ s.total_personal }}</td>
-                <td class="num mono">{{ s.citas_hoy }}</td>
+                <td class="codigo">{{ s.ruc }}</td>
+                <td class="num cifra">{{ s.total_personal }}</td>
+                <td class="num cifra">{{ s.citas_hoy }}</td>
                 <td>
                   <span :class="['estado-pill', s.estado === 'activa' ? 'ok' : 'neutral']">
                     <span class="dot"></span>{{ capitalizar(s.estado) }}
@@ -246,7 +246,7 @@
     </div>
 
     <!-- Nueva empresa -->
-    <div v-if="modalNueva" class="modal-back" @click="modalNueva = false">
+    <div v-if="modalNueva" class="modal-back" v-dialogo="() => (modalNueva = false)">
       <div class="modal modal-wide" @click.stop>
         <div class="m-head"><h3>Nueva empresa</h3></div>
         <div class="m-body">
@@ -260,24 +260,24 @@
           </p>
           <div class="form-grid">
             <div class="field">
-              <label>RUC <span class="req">*</span></label>
-              <input v-model.trim="nueva.ruc" type="text" maxlength="11" />
+              <label for="empresa-ruc-2">RUC <span class="req">*</span></label>
+              <input id="empresa-ruc-2" v-model.trim="nueva.ruc" type="text" maxlength="11" />
             </div>
             <div class="field">
-              <label>Razón social <span class="req">*</span></label>
-              <input v-model.trim="nueva.razon_social" type="text" />
+              <label for="empresa-razon-social-2">Razón social <span class="req">*</span></label>
+              <input id="empresa-razon-social-2" v-model.trim="nueva.razon_social" type="text" />
             </div>
             <div class="field">
-              <label>Nombre comercial</label>
-              <input v-model.trim="nueva.nombre_comercial" type="text" />
+              <label for="empresa-nombre-comercial-2">Nombre comercial</label>
+              <input id="empresa-nombre-comercial-2" v-model.trim="nueva.nombre_comercial" type="text" />
             </div>
             <div class="field">
-              <label>Teléfono</label>
-              <input v-model.trim="nueva.telefono" type="tel" />
+              <label for="empresa-telefono-2">Teléfono</label>
+              <input id="empresa-telefono-2" v-model.trim="nueva.telefono" type="tel" />
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Dirección</label>
-              <input v-model.trim="nueva.direccion_fiscal" type="text" />
+              <label for="empresa-direccion-fiscal-2">Dirección</label>
+              <input id="empresa-direccion-fiscal-2" v-model.trim="nueva.direccion_fiscal" type="text" />
             </div>
           </div>
         </div>
@@ -302,6 +302,9 @@ import PageHeader from "../../../layouts/PageHeader.vue";
 import { empresasApi } from "../api/empresas.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { capitalizar } from "../../../shared/components/ui/format.js";
+import { useEmpresa } from "@/shared/composables/useEmpresa.js";
+
+const { cargarEmpresa: refrescarEmpresaCompartida } = useEmpresa();
 
 const { isSuperAdmin } = useAuth();
 const esSuperAdmin = computed(() => isSuperAdmin.value);
@@ -370,6 +373,8 @@ async function guardar() {
     await empresasApi.actualizar(empresa.value.id, p);
     mensaje.value = "Datos de la empresa actualizados.";
     await cargarEmpresa();
+    // El sidebar y los cálculos de IGV leen la empresa compartida.
+    refrescarEmpresaCompartida({ forzar: true });
   } catch (e) {
     error.value = e.message;
   } finally {

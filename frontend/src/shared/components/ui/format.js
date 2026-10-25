@@ -55,7 +55,8 @@ export const fmtHora = (d) => {
 /** "hace 3 días" / "en 2 semanas": para vencimientos y últimas visitas. */
 export const fmtRelativo = (d) => {
   if (!d) return "—";
-  const date = new Date(d);
+  const m = typeof d === "string" && d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(d);
   if (Number.isNaN(date.getTime())) return "—";
   const dias = Math.round((date - new Date()) / 86400000);
   const rtf = new Intl.RelativeTimeFormat("es", { numeric: "auto" });

@@ -309,7 +309,8 @@ fi
 echo "═══ 8. Archivos clínicos: el almacén no sabe de empresas ═══"
 # MinIO no filtra por empresa: la clave del objeto es tan sensible como la fila
 # que la guarda, y el ticket de descarga la firmaba sin mirar de quién era.
-printf 'RADIOGRAFIA DE PRUEBA' > /tmp/vet-rx.png
+# Cabecera PNG real: la subida ahora mira los primeros bytes, no la etiqueta.
+printf '\x89PNG\r\n\x1a\n\0\0\0\rIHDR RADIOGRAFIA DE PRUEBA' > /tmp/vet-rx.png
 SUBIDA=$(curl -s -X POST "$API/archivos" -H "Authorization: Bearer $T_VET1" \
          -F "file=@/tmp/vet-rx.png;type=image/png")
 KEY=$(python3 -c 'import sys,json;print(json.load(sys.stdin).get("data",{}).get("storage_key",""))' <<<"$SUBIDA")
@@ -432,9 +433,59 @@ if [[ -n "$PLAN_T" && -n "$MASC_L" ]]; then
   [[ -n "$SUS_T" ]] && { c=$(req "$T_E1" "/planes/suscripciones/$SUS_T/cancelar" PATCH '{"motivo":"fin de la prueba"}')
                          check "se cancela la suscripción" 200 "$c"; }
   c=$(req "$T_E1" "/planes/$PLAN_T" DELETE); check "ya se puede retirar el plan" 200 "$c"
+  # La cuota del plan (10) tiene que haber llegado a la cuenta del propietario.
+  CUOTA=$(docker exec veterp_postgres_dev psql -U postgres -d vet_demo -Atc \
+    "SELECT COALESCE(SUM(total),0) FROM core.ordenes_servicio
+      WHERE origen_tabla = 'suscripcion_cuota' AND suscripcion_id = '$SUS_T'" 2>/dev/null | tr -d '[:space:]')
+  check "la cuota del plan llega a la cuenta" "10.00" "${CUOTA:-sin-dato}"
+  docker exec veterp_postgres_dev psql -U postgres -d vet_demo -qc \
+    "DELETE FROM core.ordenes_servicio WHERE origen_tabla = 'suscripcion_cuota' AND suscripcion_id = '$SUS_T'" >/dev/null 2>&1
 fi
 docker exec veterp_postgres_dev psql -U postgres -d vet_demo -qc \
   "DELETE FROM core.ordenes_servicio WHERE descripcion LIKE 'Verificacion de plan%'" >/dev/null 2>&1
+
+echo "═══ 12. El mostrador: lo que no se puede cobrar mal ═══"
+CLI_M=$(docker exec veterp_postgres_dev psql -U postgres -d vet_demo -Atc \
+  "SELECT id FROM core.clientes WHERE deleted_at IS NULL AND tipo_documento = 'DNI'
+      AND empresa_id = (SELECT id FROM core.empresas WHERE ruc = '20601234567')
+    ORDER BY created_at LIMIT 1" 2>/dev/null | tr -d '[:space:]')
+if [[ -n "$CLI_M" ]]; then
+  KEY=$(python3 -c 'import uuid;print(uuid.uuid4())')
+  NV="{\"cliente_id\":\"$CLI_M\",\"tipo\":\"nota_venta\",\"idempotency_key\":\"$KEY\",\"items\":[{\"descripcion\":\"Verificacion mostrador\",\"cantidad\":1,\"precio_unitario\":25}]}"
+  c=$(req "$T_E1" /facturacion POST "$NV"); check "emite la nota de venta" 201 "$c"
+  NV_ID=$(jid)
+  req "$T_E1" /facturacion POST "$NV" >/dev/null
+  NV_ID2=$(jid)
+  check "un doble clic devuelve el mismo comprobante" "$NV_ID" "${NV_ID2:-sin-id}"
+
+  c=$(req "$T_E1" /facturacion POST "{\"cliente_id\":\"$CLI_M\",\"tipo\":\"boleta\",\"serie\":\"F001\",\"items\":[{\"descripcion\":\"X\",\"cantidad\":1,\"precio_unitario\":10}]}")
+  check "una boleta no sale con serie F" 422 "$c"
+
+  c=$(req "$T_E1" /pagos POST "{\"cliente_id\":\"$CLI_M\",\"monto\":5,\"metodo\":\"yape\"}")
+  check "un Yape sin número de operación no entra" 422 "$c"
+
+  OPE="VER$(date +%s)"
+  c=$(req "$T_E1" /pagos POST "{\"cliente_id\":\"$CLI_M\",\"monto\":5,\"metodo\":\"yape\",\"referencia\":\"$OPE\",\"aplicaciones\":[{\"comprobante_id\":\"$NV_ID\",\"monto\":5}]}")
+  check "el Yape con su operación se cobra" 201 "$c"
+  PAGO_ID=$(jid)
+  c=$(req "$T_E1" /pagos POST "{\"cliente_id\":\"$CLI_M\",\"monto\":5,\"metodo\":\"yape\",\"referencia\":\"$OPE\"}")
+  check "el mismo voucher no se registra dos veces" 409 "$c"
+
+  c=$(req "$T_E1" /pagos POST "{\"cliente_id\":\"$CLI_M\",\"monto\":50,\"metodo\":\"plin\",\"referencia\":\"X$OPE\",\"aplicaciones\":[{\"comprobante_id\":\"$NV_ID\",\"monto\":50}]}")
+  check "no se cobra más que el saldo" 422 "$c"
+
+  [[ -n "$PAGO_ID" ]] && req "$T_E1" "/pagos/$PAGO_ID/anular" PATCH '{"motivo":"fin de la verificación"}' >/dev/null
+  c=$(req "$T_E1" "/facturacion/$NV_ID/anular" PATCH '{"motivo":"fin de la verificación"}')
+  check "sin cobros vivos, la nota de venta se anula" 200 "$c"
+fi
+
+# Sin caja abierta la respuesta es data:null, no el sobre entero (el frontend
+# lo leía como "turno abierto desde —").
+c=$(get "$T_VET1" /caja/actual)
+if [[ "$c" == "200" ]]; then
+  CAJA_NULL=$(python3 -c 'import json;print(json.load(open("/tmp/vbody")).get("data") is None)')
+  check "sin caja abierta, /caja/actual responde data:null" True "$CAJA_NULL"
+fi
 
 echo
 echo "═══════════════════════════════════════"

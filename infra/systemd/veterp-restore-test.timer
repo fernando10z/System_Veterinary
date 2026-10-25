@@ -1,0 +1,9 @@
+[Unit]
+Description=ERP Veterinario — prueba de restauración semanal (domingo 04:00)
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

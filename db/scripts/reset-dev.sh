@@ -4,6 +4,10 @@
 # Requiere ALLOW_RESET=yes explícito: nunca debe correr por accidente.
 #
 #   ALLOW_RESET=yes bash db/scripts/reset-dev.sh
+#
+# Carga los datos de demostración (db/seeds/) salvo SEED_DEMO=0: la base de
+# desarrollo es la que usan scripts/verificar-api.sh y scripts/flujo-clinico.sh,
+# y ambos cuentan con esos usuarios y esa cartera.
 # =============================================================================
 set -euo pipefail
 
@@ -23,5 +27,5 @@ fi
 echo "→ Borrando schemas de $DB_NAME…"
 run_psql -c "DROP SCHEMA IF EXISTS app CASCADE; DROP SCHEMA IF EXISTS internal CASCADE; DROP SCHEMA IF EXISTS core CASCADE; DROP SCHEMA IF EXISTS audit CASCADE;" > /dev/null
 
-bash "$SCRIPT_DIR/apply-migrations.sh"
+SEED_DEMO="${SEED_DEMO:-1}" bash "$SCRIPT_DIR/apply-migrations.sh"
 echo "✓ Base de desarrollo reconstruida."

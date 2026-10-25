@@ -1,3 +1,4 @@
+import { Vaciable } from "../../../common/decorators/vaciable.decorator";
 import {
   IsDateString, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min,
 } from "class-validator";
@@ -19,5 +20,5 @@ export class ActualizarConsultaDto {
   @IsOptional() @IsString() plan_terapeutico?: string;
   @IsOptional() @IsString() prescripcion?: string;
   @IsOptional() @IsString() indicaciones_casa?: string;
-  @IsOptional() @IsDateString() proxima_visita?: string;
+  @Vaciable() @IsDateString() proxima_visita?: string;
 }

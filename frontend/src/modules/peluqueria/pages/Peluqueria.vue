@@ -92,25 +92,40 @@
                   @click="abrirEntrega(o)">
             <PackageCheck :size="13" /> Entregar
           </button>
+          <button v-if="puedeCobrar && ['terminado','entregado'].includes(o.estado) && o.propietario?.id"
+                  class="btn" @click="cobroOrden = o">
+            <Wallet :size="13" /> Cobrar
+          </button>
           <button class="btn" @click="verFicha(o)"><FileText :size="13" /> Ficha</button>
         </div>
       </article>
     </div>
 
+    <CobroRapido
+      v-if="cobroOrden"
+      :cliente="{ id: cobroOrden.propietario.id, nombre_completo: cobroOrden.propietario.nombre }"
+      :mascota="cobroOrden.mascota?.nombre"
+      :mascota-id="cobroOrden.mascota?.id"
+      @close="cobroOrden = null"
+      @listo="cobroOrden = null"
+    />
+
     <!-- ───────────────── Recepción ───────────────── -->
-    <div v-if="modalRecibir" class="modal-back" @click="modalRecibir = false">
+    <div v-if="modalRecibir" class="modal-back" v-dialogo="() => (modalRecibir = false)">
       <div class="modal modal-wide" @click.stop>
         <div class="m-head"><h3>Recibir paciente en peluquería</h3></div>
         <div class="m-body">
           <div class="form-grid">
             <div class="field" style="grid-column: 1 / -1">
-              <label>Paciente <span class="req">*</span></label>
-              <select v-model="rec.mascota_id">
-                <option value="">Elige un paciente…</option>
-                <option v-for="m in mascotas" :key="m.id" :value="m.id">
-                  {{ m.nombre }}<template v-if="m.propietario"> — {{ m.propietario }}</template>
-                </option>
-              </select>
+              <label for="peluqueria-buscar">Paciente <span class="req">*</span></label>
+              <div v-if="mascotaSel" class="sel-paciente">
+                <div class="grow">
+                  <strong>{{ mascotaSel.nombre }}</strong>
+                  <small>{{ mascotaSel.especie }} · {{ clienteSel?.nombre_completo }}</small>
+                </div>
+                <button class="btn mini" type="button" @click="limpiarPaciente">Cambiar</button>
+              </div>
+              <BuscadorPaciente v-else input-id="peluqueria-buscar" @elegir="elegirPaciente" />
             </div>
 
             <div class="field" style="grid-column: 1 / -1">
@@ -125,16 +140,16 @@
             </div>
 
             <div class="field">
-              <label>Peso (kg)</label>
-              <input v-model.number="rec.peso_kg" type="number" step="0.1" min="0" />
+              <label for="peluqueria-peso-kg">Peso (kg)</label>
+              <input id="peluqueria-peso-kg" v-model.number="rec.peso_kg" type="number" step="0.1" min="0" />
             </div>
             <div class="field">
-              <label>Entrega prometida</label>
-              <input v-model="rec.entrega_estimada" type="datetime-local" />
+              <label for="peluqueria-entrega-estimada">Entrega prometida</label>
+              <input id="peluqueria-entrega-estimada" v-model="rec.entrega_estimada" type="datetime-local" />
             </div>
             <div class="field">
-              <label>Estado del pelaje</label>
-              <select v-model="rec.condicion_pelaje">
+              <label for="peluqueria-condicion-pelaje">Estado del pelaje</label>
+              <select id="peluqueria-condicion-pelaje" v-model="rec.condicion_pelaje">
                 <option value="">Sin definir</option>
                 <option v-for="c in CONDICION_PELAJE" :key="c" :value="c">
                   {{ capitalizar(c.replace("_", " ")) }}
@@ -142,8 +157,8 @@
               </select>
             </div>
             <div class="field">
-              <label>Temperamento</label>
-              <select v-model="rec.temperamento">
+              <label for="peluqueria-temperamento">Temperamento</label>
+              <select id="peluqueria-temperamento" v-model="rec.temperamento">
                 <option value="">Sin definir</option>
                 <option v-for="c in TEMPERAMENTOS" :key="c" :value="c">
                   {{ capitalizar(c.replace("_", " ")) }}
@@ -152,8 +167,8 @@
             </div>
 
             <div class="field" style="grid-column: 1 / -1">
-              <label>Cómo llegó</label>
-              <textarea v-model="rec.observaciones_ingreso" rows="2"
+              <label for="peluqueria-observaciones-ingreso">Cómo llegó</label>
+              <textarea id="peluqueria-observaciones-ingreso" v-model="rec.observaciones_ingreso" rows="2"
                 placeholder="Heridas, costras, nudos, cojera… lo que se vea al recibirlo"></textarea>
               <small class="muted">
                 Dejar constancia aquí es lo que evita la discusión de después sobre
@@ -179,24 +194,24 @@
     </div>
 
     <!-- ───────────────── Hallazgo ───────────────── -->
-    <div v-if="modalHallazgo" class="modal-back" @click="modalHallazgo = false">
+    <div v-if="modalHallazgo" class="modal-back" v-dialogo="() => (modalHallazgo = false)">
       <div class="modal" @click.stop>
         <div class="m-head"><h3>Hallazgo · {{ activa?.mascota?.nombre }}</h3></div>
         <div class="m-body">
           <div class="form-grid">
             <div class="field" style="grid-column: 1 / -1">
-              <label>Qué se vio</label>
-              <select v-model="hal.hallazgo">
+              <label for="peluqueria-hallazgo">Qué se vio</label>
+              <select id="peluqueria-hallazgo" v-model="hal.hallazgo">
                 <option v-for="h in HALLAZGOS" :key="h.v" :value="h.v">{{ h.t }}</option>
               </select>
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Zona</label>
-              <input v-model="hal.zona" placeholder="Lomo, axila izquierda, oreja derecha…" />
+              <label for="peluqueria-zona">Zona</label>
+              <input id="peluqueria-zona" v-model="hal.zona" placeholder="Lomo, axila izquierda, oreja derecha…" />
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Detalle</label>
-              <textarea v-model="hal.detalle" rows="2"></textarea>
+              <label for="peluqueria-detalle">Detalle</label>
+              <textarea id="peluqueria-detalle" v-model="hal.detalle" rows="2"></textarea>
             </div>
             <div class="field" style="grid-column: 1 / -1">
               <label class="check-line">
@@ -214,14 +229,14 @@
     </div>
 
     <!-- ───────────────── Terminar ───────────────── -->
-    <div v-if="modalTerminar" class="modal-back" @click="modalTerminar = false">
+    <div v-if="modalTerminar" class="modal-back" v-dialogo="() => (modalTerminar = false)">
       <div class="modal" @click.stop>
         <div class="m-head"><h3>Terminar el trabajo</h3></div>
         <div class="m-body">
           <div class="form-grid">
             <div class="field" style="grid-column: 1 / -1">
-              <label>Observaciones de salida</label>
-              <textarea v-model="fin.observaciones_salida" rows="3"
+              <label for="peluqueria-observaciones-salida">Observaciones de salida</label>
+              <textarea id="peluqueria-observaciones-salida" v-model="fin.observaciones_salida" rows="3"
                 placeholder="Qué se hizo, qué quedó pendiente, qué recomendar al propietario"></textarea>
               <small class="muted">
                 Al terminar se generan los cargos y la sesión entra en la historia clínica.
@@ -237,15 +252,15 @@
     </div>
 
     <!-- ───────────────── Entregar ───────────────── -->
-    <div v-if="modalEntregar" class="modal-back" @click="modalEntregar = false">
+    <div v-if="modalEntregar" class="modal-back" v-dialogo="() => (modalEntregar = false)">
       <div class="modal" @click.stop>
         <div class="m-head"><h3>Entregar el paciente</h3></div>
         <div class="m-body">
           <div class="form-grid">
-            <div class="field"><label>Quién lo recoge</label>
-              <input v-model="ent.entregado_a" /></div>
-            <div class="field"><label>Documento</label>
-              <input v-model="ent.documento_receptor" /></div>
+            <div class="field"><label for="peluqueria-entregado-a">Quién lo recoge</label>
+              <input id="peluqueria-entregado-a" v-model="ent.entregado_a" /></div>
+            <div class="field"><label for="peluqueria-documento-receptor">Documento</label>
+              <input id="peluqueria-documento-receptor" v-model="ent.documento_receptor" /></div>
           </div>
         </div>
         <div class="m-foot modal-actions">
@@ -261,27 +276,31 @@
 import { ref, reactive, computed, onMounted } from "vue";
 import {
   RefreshCw, LogIn, AlertCircle, AlertTriangle, User, Clock, Scissors,
-  ClipboardCheck, Play, Eye, Check, PackageCheck, FileText,
+  ClipboardCheck, Play, Eye, Check, PackageCheck, FileText, Wallet,
 } from "lucide-vue-next";
+import BuscadorPaciente from "../../mascotas/components/BuscadorPaciente.vue";
+import CobroRapido from "../../facturacion/components/CobroRapido.vue";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import {
   peluqueriaApi, HALLAZGOS, CONDICION_PELAJE, TEMPERAMENTOS,
 } from "../api/peluqueria.api.js";
-import { mascotasApi } from "../../mascotas/api/mascotas.api.js";
 import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { notify } from "../../../shared/composables/useNotify.js";
 import { capitalizar, fmtHora, fmtSoles } from "../../../shared/components/ui/format.js";
+import { hoyISO, datetimeLocalAISO } from "@/shared/utils/fechas.js";
 
 const { hasPermission } = useAuth();
 const puedeOperar = computed(() => hasPermission("peluqueria:operar"));
+const puedeCobrar = computed(() => hasPermission("facturacion:emitir"));
+const cobroOrden = ref(null);
 
 const ETIQUETA = {
   recibido: "Esperando", en_proceso: "En proceso", terminado: "Listo",
   entregado: "Entregado", cancelado: "Cancelado",
 };
 
-const hoy = new Date().toISOString().slice(0, 10);
+const hoy = hoyISO();
 const fecha = ref(hoy);
 const esHoy = computed(() => fecha.value === hoy);
 const ordenes = ref([]);
@@ -290,7 +309,11 @@ const cargando = ref(false);
 const guardando = ref(false);
 const error = ref("");
 
-const mascotas = ref([]);
+// El paciente se busca: un <select> con los primeros 100 dejaba afuera a casi todos.
+const clienteSel = ref(null);
+const mascotaSel = ref(null);
+function elegirPaciente(c, m) { clienteSel.value = c; mascotaSel.value = m; rec.mascota_id = m.id; }
+function limpiarPaciente() { clienteSel.value = null; mascotaSel.value = null; rec.mascota_id = ""; }
 const serviciosGrooming = ref([]);
 const activa = ref(null);
 
@@ -328,29 +351,28 @@ async function abrirRecepcion() {
     mascota_id: "", servicios: [], peso_kg: null, entrega_estimada: "",
     condicion_pelaje: "", temperamento: "", observaciones_ingreso: "", autoriza_rapado: false,
   });
+  limpiarPaciente();
   modalRecibir.value = true;
-  if (!mascotas.value.length) {
+  if (!serviciosGrooming.value.length) {
     try {
-      const [m, s] = await Promise.all([
-        mascotasApi.listar({ pageSize: 100 }),
-        catalogosApi.servicios(),
-      ]);
-      mascotas.value = m.data ?? [];
+      const s = await catalogosApi.servicios({ estado: "activo" });
       serviciosGrooming.value = (s.data ?? []).filter((x) => x.tipo === "grooming");
     } catch (e) {
-      error.value = e.message;
+      notify.toast(`No se pudieron cargar los servicios: ${e.message}`, "error");
     }
   }
 }
 
 async function recibir() {
+  if (guardando.value) return;
   guardando.value = true;
   try {
     await peluqueriaApi.recibir({
       mascota_id: rec.mascota_id,
       servicios: rec.servicios.map((id) => ({ servicio_id: id })),
       peso_kg: rec.peso_kg || undefined,
-      entrega_estimada: rec.entrega_estimada || undefined,
+      // datetime-local no lleva zona: se envía con la zona del navegador.
+      entrega_estimada: datetimeLocalAISO(rec.entrega_estimada) || undefined,
       condicion_pelaje: rec.condicion_pelaje || undefined,
       temperamento: rec.temperamento || undefined,
       observaciones_ingreso: rec.observaciones_ingreso || undefined,
@@ -465,10 +487,17 @@ onMounted(cargar);
 </script>
 
 <style scoped>
+.sel-paciente {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--emerald-soft); border: 1px solid var(--emerald-line);
+}
+.sel-paciente strong { display: block; font-size: 13.5px; color: var(--ink); }
+.sel-paciente small { font-size: 11.5px; color: var(--ink-3); }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px }
 .kpi { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px }
 .kpi .k { display: block; font-size: 11.5px; color: var(--ink-3) }
-.kpi .v { font-size: 20px; font-weight: 700 }
+.kpi .v { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 700 }
 
 .tablero { display: flex; flex-direction: column; gap: 10px }
 .ficha {
@@ -483,7 +512,7 @@ onMounted(cargar);
 /* El borde dice en qué punto del recorrido va, sin tener que leer nada. */
 .ficha.e-recibido   { border-left-color: #c8a227 }
 .ficha.e-en_proceso { border-left-color: #1c5ca3 }
-.ficha.e-terminado  { border-left-color: #15803d }
+.ficha.e-terminado  { border-left-color: var(--green) }
 .ficha.e-entregado  { border-left-color: var(--line-strong); opacity: .72 }
 .ficha.e-cancelado  { border-left-color: #b91c1c; opacity: .6 }
 
@@ -499,7 +528,7 @@ onMounted(cargar);
         border: 1px solid var(--line-strong); color: var(--ink-3); display: inline-flex; gap: 3px; align-items: center }
 .pill.e-recibido   { border-color: #e2cc86; color: #8a6d0b; background: #fdf6e0 }
 .pill.e-en_proceso { border-color: #a8c8e0; color: #1c5ca3; background: #eef5fd }
-.pill.e-terminado  { border-color: #a6d4b4; color: #15803d; background: #eefaf1 }
+.pill.e-terminado  { border-color: var(--emerald-line); color: var(--green-ink); background: var(--emerald-soft) }
 .pill.tarde        { border-color: #e8c08a; color: #9a5b06; background: #fdf1e2 }
 .pill.urgente      { border-color: #e0a8a8; color: #a31c1c; background: #fdeeee }
 

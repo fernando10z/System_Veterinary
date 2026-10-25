@@ -27,6 +27,13 @@ const ERROR_STATUS: Record<string, HttpStatus> = {
   "23505": HttpStatus.CONFLICT,            // unique_violation
   "23503": HttpStatus.UNPROCESSABLE_ENTITY, // foreign_key_violation
   "23514": HttpStatus.UNPROCESSABLE_ENTITY, // check_violation
+  P0002: HttpStatus.NOT_FOUND,             // no_data_found (id ajeno o inexistente)
+  "22023": HttpStatus.UNPROCESSABLE_ENTITY, // invalid_parameter_value
+  // Dos cajeros sobre el mismo dato: la base serializa y, si aun así se
+  // cruzan, aborta a uno. Es un "reintenta", no un fallo del sistema.
+  "40P01": HttpStatus.CONFLICT,            // deadlock_detected
+  "40001": HttpStatus.CONFLICT,            // serialization_failure
+  "55P03": HttpStatus.CONFLICT,            // lock_not_available
 };
 
 /**
@@ -39,12 +46,20 @@ const CODIGO_SEMANTICO: Record<string, string> = {
   "23505": "CONFLICT",
   "23503": "BUSINESS_RULE",
   "23514": "VALIDATION_ERROR",
+  P0002: "NOT_FOUND",
+  "22023": "VALIDATION_ERROR",
+  "40P01": "CONFLICT",
+  "40001": "CONFLICT",
+  "55P03": "CONFLICT",
 };
 
 /** Códigos SQLSTATE cuyo mensaje interno no debe llegar al cliente. */
 const MENSAJE_GENERICO: Record<string, string> = {
   "23503": "La operación afecta a registros relacionados",
   "23514": "Los datos no cumplen una restricción del sistema",
+  "40P01": "Otra operación estaba usando estos datos. Vuelve a intentarlo.",
+  "40001": "Otra operación estaba usando estos datos. Vuelve a intentarlo.",
+  "55P03": "Otra operación estaba usando estos datos. Vuelve a intentarlo.",
 };
 
 /**
@@ -135,7 +150,10 @@ export class SpExecutorService {
   async call<T = unknown>(fnName: string, params: unknown[]): Promise<T> {
     const row = await this.ejecutar<T>(fnName, params);
     this.lanzarSiFalla(fnName, row);
-    return (row.data as T) ?? (row as unknown as T);
+    // `data: null` es una respuesta ("no hay caja abierta"), no la ausencia de
+    // respuesta: se devuelve null. Solo un SP que no usa el sobre (sin clave
+    // `data`) se devuelve entero.
+    return ("data" in row ? row.data : row) as T;
   }
 
   /**

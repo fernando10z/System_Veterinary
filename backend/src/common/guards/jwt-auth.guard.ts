@@ -48,8 +48,8 @@ export class JwtAuthGuard implements CanActivate {
     try {
       payload = await this.jwt.verifyAsync<JwtPayload>(token, {
         secret: this.config.get<string>("JWT_ACCESS_SECRET"),
-        issuer: this.config.get<string>("JWT_ISSUER"),
-        audience: this.config.get<string>("JWT_AUDIENCE"),
+        issuer: this.config.get<string>("JWT_ISSUER") ?? "veterp",
+        audience: this.config.get<string>("JWT_AUDIENCE") ?? "veterp-backoffice",
       });
     } catch {
       throw new UnauthorizedException("Token inválido o expirado");

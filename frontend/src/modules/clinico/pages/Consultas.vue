@@ -77,7 +77,7 @@
               class="clickable"
               @click="$router.push(`/consultas/${c.id}`)"
             >
-              <td class="mono">{{ fmtFechaHora(c.fecha) }}</td>
+              <td class="cifra">{{ fmtFechaHora(c.fecha) }}</td>
               <td>
                 <div class="entidad-cell">
                   <div class="avatar-sm">
@@ -122,17 +122,17 @@ import PageHeader from "../../../layouts/PageHeader.vue";
 import { clinicoApi } from "../api/clinico.api.js";
 import { usersApi } from "../../users/api/users.api.js";
 import { fmtFechaHora, iniciales } from "../../../shared/components/ui/format.js";
+import { hoyISO, inicioMesISO, sumarDias } from "@/shared/utils/fechas.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const consultas = ref([]);
 const veterinarios = ref([]);
 const meta = ref({});
 const cargando = ref(false);
 
-const hoy = new Date();
-const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
 const filtros = reactive({
-  desde: inicioMes.toISOString().slice(0, 10),
-  hasta: hoy.toISOString().slice(0, 10),
+  desde: inicioMesISO(),
+  hasta: hoyISO(),
   veterinarioId: "",
   estado: "",
   page: 1,
@@ -145,11 +145,9 @@ async function cargar() {
   cargando.value = true;
   try {
     // `hasta` es exclusivo en el SP: se suma un día para incluir el día elegido.
-    const hastaExcl = new Date(filtros.hasta);
-    hastaExcl.setDate(hastaExcl.getDate() + 1);
     const r = await clinicoApi.consultas({
       desde: filtros.desde,
-      hasta: hastaExcl.toISOString().slice(0, 10),
+      hasta: sumarDias(filtros.hasta, 1),
       veterinarioId: filtros.veterinarioId || undefined,
       estado: filtros.estado || undefined,
       page: filtros.page,
@@ -157,6 +155,8 @@ async function cargar() {
     });
     consultas.value = r.data ?? [];
     meta.value = r.meta ?? {};
+  } catch (e) {
+    notify.toast(`No se pudieron cargar las consultas: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

@@ -5,6 +5,7 @@ import { CambiarPasswordPortalDto } from "./dto/cambiar-password-portal.dto";
 import { Public } from "../../common/decorators/public.decorator";
 import { PortalAuthGuard } from "../../common/guards/portal-auth.guard";
 import { CurrentCliente } from "../../common/decorators/current-cliente.decorator";
+import { LimiteCredenciales } from "../../common/decorators/limite-credenciales.decorator";
 
 /**
  * @Public() desactiva el guard del backoffice; PortalAuthGuard aplica en su
@@ -49,6 +50,7 @@ export class PortalController {
     return { ok: true, data: await this.portal.solicitarCita(clienteId, dto) };
   }
 
+  @LimiteCredenciales()
   @Post("cambiar-password")
   async cambiarPassword(
     @CurrentCliente() clienteId: string,

@@ -292,6 +292,30 @@ BEGIN
         'No se pueden agendar citas en el pasado','fecha_hora'));
   END IF;
 
+  -- Veterinario, servicio y consultorio tienen que ser de esta clínica: un id
+  -- ajeno dejaba una cita colgada de la agenda de otra empresa.
+  IF v_vet IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM core.users u
+        WHERE u.id = v_vet AND u.empresa_id = v_emp AND u.deleted_at IS NULL) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Veterinario no encontrado','veterinario_id'));
+  END IF;
+
+  IF NULLIF(p_payload->>'servicio_id','') IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM core.servicios s
+        WHERE s.id = (p_payload->>'servicio_id')::uuid AND s.empresa_id = v_emp) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Servicio no encontrado','servicio_id'));
+  END IF;
+
+  IF NULLIF(p_payload->>'consultorio_id','') IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM core.consultorios c
+        WHERE c.id = (p_payload->>'consultorio_id')::uuid AND c.empresa_id = v_emp) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Consultorio no encontrado','consultorio_id'));
+  END IF;
+
+  PERFORM internal.bloquear_agenda(v_vet);
   IF v_vet IS NOT NULL AND internal.hay_solapamiento_cita(v_emp, v_vet, v_fecha, v_dur) THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('CONFLICT',
@@ -371,6 +395,15 @@ BEGIN
 
   v_vet := COALESCE(p_veterinario_id, v_cita.veterinario_id);
 
+  IF p_veterinario_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM core.users u
+        WHERE u.id = p_veterinario_id AND u.empresa_id = v_cita.empresa_id
+          AND u.deleted_at IS NULL) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Veterinario no encontrado','veterinario_id'));
+  END IF;
+
+  PERFORM internal.bloquear_agenda(v_vet);
   IF v_vet IS NOT NULL AND
      internal.hay_solapamiento_cita(v_cita.empresa_id, v_vet, p_fecha_hora, v_cita.duracion_min, p_id) THEN
     RETURN jsonb_build_object('ok', false,
@@ -438,6 +471,20 @@ BEGIN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('BUSINESS_RULE',
         'Una cita completada ya no cambia de estado'));
+  END IF;
+
+  -- Una cita cancelada o perdida liberó su hueco, y otro paciente pudo
+  -- ocuparlo. Reactivarla es volver a reservar: se comprueba igual que al crear.
+  IF v_cita.estado IN ('cancelada','no_asistio')
+     AND v_nuevo NOT IN ('cancelada','no_asistio') THEN
+    PERFORM internal.bloquear_agenda(v_cita.veterinario_id);
+    IF v_cita.veterinario_id IS NOT NULL AND internal.hay_solapamiento_cita(
+         v_cita.empresa_id, v_cita.veterinario_id, v_cita.fecha_hora,
+         v_cita.duracion_min, p_id) THEN
+      RETURN jsonb_build_object('ok', false,
+        'error', internal.error_jsonb('CONFLICT',
+          'Ese horario ya lo ocupó otra cita: reprográmala en vez de reactivarla'));
+    END IF;
   END IF;
 
   IF v_nuevo = 'cancelada' AND COALESCE(trim(p_motivo),'') = '' THEN

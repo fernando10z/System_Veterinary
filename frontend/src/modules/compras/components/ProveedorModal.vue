@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal modal-wide" @click.stop>
       <div class="m-head"><h3>{{ esEdicion ? "Editar proveedor" : "Nuevo proveedor" }}</h3></div>
 
@@ -10,55 +10,59 @@
 
         <div class="form-grid">
           <div class="field">
-            <label>Tipo de documento</label>
-            <select v-model="form.tipo_documento" :disabled="esEdicion">
+            <label for="proveedorm-tipo-documento">Tipo de documento</label>
+            <select id="proveedorm-tipo-documento" v-model="form.tipo_documento" :disabled="esEdicion">
               <option value="RUC">RUC</option>
               <option value="DNI">DNI</option>
               <option value="CE">Carné de extranjería</option>
             </select>
           </div>
           <div class="field">
-            <label>Número <span class="req">*</span></label>
-            <input v-model.trim="form.numero_documento" type="text" :disabled="esEdicion" />
+            <label for="proveedorm-numero-documento">Número <span class="req">*</span></label>
+            <input
+              id="proveedorm-numero-documento" v-model.trim="form.numero_documento" type="text" :disabled="esEdicion"
+              :maxlength="form.tipo_documento === 'RUC' ? 11 : form.tipo_documento === 'DNI' ? 8 : 12"
+              :inputmode="form.tipo_documento === 'CE' ? 'text' : 'numeric'"
+            />
           </div>
           <div class="field" style="grid-column: 1 / -1">
-            <label>Razón social <span class="req">*</span></label>
-            <input v-model.trim="form.razon_social" type="text" />
+            <label for="proveedorm-razon-social">Razón social <span class="req">*</span></label>
+            <input id="proveedorm-razon-social" v-model.trim="form.razon_social" type="text" />
           </div>
           <div class="field">
-            <label>Nombre comercial</label>
-            <input v-model.trim="form.nombre_comercial" type="text" />
+            <label for="proveedorm-nombre-comercial">Nombre comercial</label>
+            <input id="proveedorm-nombre-comercial" v-model.trim="form.nombre_comercial" type="text" />
           </div>
           <div class="field">
-            <label>Categoría</label>
-            <select v-model="form.categoria_id">
+            <label for="proveedorm-categoria-id">Categoría</label>
+            <select id="proveedorm-categoria-id" v-model="form.categoria_id">
               <option value="">Sin categoría</option>
               <option v-for="c in categorias" :key="c.id" :value="c.id">{{ c.nombre }}</option>
             </select>
           </div>
           <div class="field">
-            <label>Teléfono</label>
-            <input v-model.trim="form.telefono" type="tel" />
+            <label for="proveedorm-telefono">Teléfono</label>
+            <input id="proveedorm-telefono" v-model.trim="form.telefono" type="tel" />
           </div>
           <div class="field">
-            <label>Correo</label>
-            <input v-model.trim="form.correo" type="email" />
+            <label for="proveedorm-correo">Correo</label>
+            <input id="proveedorm-correo" v-model.trim="form.correo" type="email" />
           </div>
           <div class="field">
-            <label>Días de crédito</label>
-            <input v-model.number="form.dias_credito" type="number" min="0" />
+            <label for="proveedorm-dias-credito">Días de crédito</label>
+            <input id="proveedorm-dias-credito" v-model.number="form.dias_credito" type="number" min="0" />
           </div>
           <div class="field">
-            <label>Banco</label>
-            <input v-model.trim="form.banco" type="text" />
+            <label for="proveedorm-banco">Banco</label>
+            <input id="proveedorm-banco" v-model.trim="form.banco" type="text" />
           </div>
           <div class="field" style="grid-column: 1 / -1">
-            <label>Cuenta bancaria</label>
-            <input v-model.trim="form.cuenta_bancaria" type="text" />
+            <label for="proveedorm-cuenta-bancaria">Cuenta bancaria</label>
+            <input id="proveedorm-cuenta-bancaria" v-model.trim="form.cuenta_bancaria" type="text" />
           </div>
           <div class="field" style="grid-column: 1 / -1">
-            <label>Dirección</label>
-            <input v-model.trim="form.direccion" type="text" />
+            <label for="proveedorm-direccion">Dirección</label>
+            <input id="proveedorm-direccion" v-model.trim="form.direccion" type="text" />
           </div>
         </div>
       </div>
@@ -77,6 +81,7 @@
 import { reactive, ref, computed } from "vue";
 import { AlertCircle } from "lucide-vue-next";
 import { comprasApi } from "../api/compras.api.js";
+import { validarDocumento, validarCorreo, validarTelefono } from "../../../shared/utils/validaciones.js";
 
 const props = defineProps({
   proveedor: { type: Object, default: null },
@@ -105,7 +110,14 @@ const form = reactive({
 async function guardar() {
   error.value = "";
   if (!form.razon_social) { error.value = "Ingresa la razón social."; return; }
-  if (!esEdicion.value && !form.numero_documento) { error.value = "Ingresa el documento."; return; }
+  if (!esEdicion.value) {
+    const errDoc = validarDocumento(form.tipo_documento, form.numero_documento);
+    if (errDoc) { error.value = errDoc; return; }
+  }
+  const errCorreo = validarCorreo(form.correo);
+  if (errCorreo) { error.value = errCorreo; return; }
+  const errTel = validarTelefono(form.telefono);
+  if (errTel) { error.value = errTel; return; }
 
   guardando.value = true;
   try {

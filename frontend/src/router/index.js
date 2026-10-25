@@ -3,10 +3,9 @@ import { ACCESS_TOKEN_KEY, USER_KEY, PERMS_KEY, PORTAL_TOKEN_KEY } from "../shar
 import { PERMISO_POR_RUTA } from "../shared/config/navigation.js";
 import MainLayout from "../layouts/MainLayout.vue";
 
-// El login y el panel se cargan eager (son lo primero que ve el usuario);
-// el resto va lazy para que el bundle inicial no cargue todo el ERP.
+// El login va eager (es lo primero que ve quien no tiene sesión); el panel y
+// el resto van lazy para que el bundle inicial no cargue todo el ERP.
 import Login from "../modules/auth/pages/Login.vue";
-import Dashboard from "../modules/dashboard/pages/Dashboard.vue";
 
 const routes = [
   { path: "/", redirect: "/dashboard" },
@@ -79,7 +78,8 @@ const routes = [
     component: MainLayout,
     meta: { requiereAuth: true },
     children: [
-      { path: "dashboard", name: "dashboard", component: Dashboard },
+      { path: "dashboard", name: "dashboard",
+        component: () => import("../modules/dashboard/pages/Dashboard.vue") },
       { path: "cambiar-password", name: "cambiar-password",
         component: () => import("../modules/auth/pages/CambiarPassword.vue"),
         meta: { titulo: "Contraseña" } },
@@ -195,13 +195,15 @@ router.beforeEach((to) => {
   if (to.meta.requierePortal) {
     return localStorage.getItem(PORTAL_TOKEN_KEY) ? true : { path: "/portal/login" };
   }
+  const autenticado = !!localStorage.getItem(ACCESS_TOKEN_KEY);
+  // Con sesión abierta, /login no tiene sentido: va directo al panel. Tiene
+  // que ir antes del chequeo de ruta pública, que si no lo deja pasar.
+  if (to.path === "/login" && autenticado) return { path: "/dashboard" };
   if (to.meta.publica) return true;
 
-  const autenticado = !!localStorage.getItem(ACCESS_TOKEN_KEY);
   if (to.meta.requiereAuth && !autenticado) {
     return { path: "/login", query: { from: to.fullPath } };
   }
-  if (to.path === "/login" && autenticado) return { path: "/dashboard" };
 
   // Con una clave temporal sin estrenar no se entra a ningún lado: el backend
   // responde 403 a todo lo demás, así que dejar navegar solo confunde.

@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal" @click.stop>
       <div class="m-head"><h3>Nueva consulta</h3></div>
 
@@ -14,13 +14,13 @@
         </p>
 
         <div class="field">
-          <label>Motivo de la consulta <span class="req">*</span></label>
-          <textarea v-model="motivo" rows="3" placeholder="Decaimiento y falta de apetito desde ayer…"></textarea>
+          <label for="consultamo-motivo">Motivo de la consulta <span class="req">*</span></label>
+          <textarea id="consultamo-motivo" v-model="motivo" rows="3" placeholder="Decaimiento y falta de apetito desde ayer…"></textarea>
         </div>
 
         <div class="field">
-          <label>Veterinario</label>
-          <select v-model="veterinarioId">
+          <label for="consultamo-veterinarioid">Veterinario</label>
+          <select id="consultamo-veterinarioid" v-model="veterinarioId">
             <option value="">Yo mismo</option>
             <option v-for="v in veterinarios" :key="v.id" :value="v.id">
               {{ v.nombres }} {{ v.apellido_paterno }}

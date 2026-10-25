@@ -9,6 +9,20 @@
 
 SET search_path = app, internal, core, public;
 
+-- El rol de la aplicación tiene que existir antes de 90_grants.sql: varias
+-- migraciones de SPs (34–37) terminan con un GRANT a vet_app_user, y sobre un
+-- cluster recién creado —un servidor nuevo, el CI— fallaban con "role
+-- vet_app_user does not exist". Se crea aquí, igual que en 90_grants.sql: sin
+-- contraseña utilizable hasta que el despliegue la fije.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vet_app_user') THEN
+    EXECUTE format(
+      'CREATE ROLE vet_app_user LOGIN PASSWORD %L',
+      encode(gen_random_bytes(32), 'base64'));
+  END IF;
+END $$;
+
 -- -----------------------------------------------------------------------------
 -- app.sp_auth_login
 -- El hash bcrypt se compara EN LA BASE con pgcrypto crypt(): el backend nunca ve
@@ -134,6 +148,14 @@ BEGIN
       'error', internal.error_jsonb('NOT_FOUND','Usuario no encontrado'));
   END IF;
 
+  -- El refresh de sesión pasa por aquí. Sin esta comprobación, una cuenta dada
+  -- de baja o suspendida seguía renovando su token cada 15 minutos durante los
+  -- 7 días del refresh: la baja solo se notaba en los SPs con assert_permiso.
+  IF v_user.estado <> 'activo' THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('UNAUTHORIZED','La cuenta no está activa'));
+  END IF;
+
   SELECT to_jsonb(r) INTO v_rol FROM core.roles r WHERE r.id = v_user.rol_id;
 
   SELECT COALESCE(jsonb_agg(p.codigo ORDER BY p.codigo), '[]'::jsonb) INTO v_permisos
@@ -234,8 +256,11 @@ BEGIN
 
   v_token := encode(gen_random_bytes(24), 'hex');
 
+  -- En la base queda solo el SHA-256 del token. El token en claro viaja una
+  -- vez, en el enlace del correo: quien lea la tabla (un backup extraviado, un
+  -- volcado de soporte) no obtiene enlaces de reseteo utilizables.
   UPDATE core.users
-     SET password_reset_token = v_token,
+     SET password_reset_token = encode(digest(v_token, 'sha256'), 'hex'),
          password_reset_expires = now() + INTERVAL '1 hour',
          updated_at = now()
    WHERE id = v_user_id;
@@ -271,10 +296,16 @@ BEGIN
       'error', internal.error_jsonb('VALIDATION_ERROR', v_motivo, 'password'));
   END IF;
 
+  IF p_token IS NULL OR length(p_token) < 16 THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('FORBIDDEN','El enlace es inválido o ya expiró'));
+  END IF;
+
   SELECT id INTO v_user_id FROM core.users
-   WHERE password_reset_token = p_token
+   WHERE password_reset_token = encode(digest(p_token, 'sha256'), 'hex')
      AND password_reset_expires > now()
-     AND deleted_at IS NULL;
+     AND deleted_at IS NULL
+     AND estado = 'activo';
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
@@ -291,7 +322,10 @@ BEGIN
 
   PERFORM internal.registrar_auditoria(v_user_id, NULL, 'reset_password', 'users', v_user_id);
 
-  RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('updated', true));
+  -- user_id: el backend lo usa para cerrar las sesiones abiertas de la cuenta
+  -- y no lo reenvía al cliente.
+  RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
+    'updated', true, 'user_id', v_user_id));
 
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));
@@ -299,8 +333,24 @@ END;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- Bloqueo por intentos fallidos del portal.
+--
+-- El staff tiene el suyo en core.users desde el principio; el portal no tenía
+-- ninguno, y su usuario es un DNI —ocho dígitos que figuran en cualquier
+-- boleta—. Con el límite por IP como única barrera, una botnet podía probar
+-- contraseñas contra el DNI de un propietario sin que nadie se enterara.
+--
+-- Las columnas se añaden aquí, junto a quien las usa, con IF NOT EXISTS: la
+-- migración sigue siendo reaplicable sobre una base ya creada.
+-- -----------------------------------------------------------------------------
+ALTER TABLE core.clientes
+  ADD COLUMN IF NOT EXISTS portal_intentos_fallidos INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS portal_bloqueado_hasta   TIMESTAMPTZ;
+
+-- -----------------------------------------------------------------------------
 -- app.sp_portal_login — acceso del PROPIETARIO al portal (no es staff)
 -- Emite un contexto separado: el backend firma un JWT con type=portal.
+-- Bloquea el acceso 15 min tras 5 intentos fallidos, igual que el staff.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.sp_portal_login(
   p_documento VARCHAR,
@@ -329,17 +379,35 @@ BEGIN
       'error', internal.error_jsonb('UNAUTHORIZED','Credenciales inválidas'));
   END IF;
 
+  -- Misma respuesta que para un documento que no existe: "el acceso está
+  -- deshabilitado" confirmaba que ese DNI es cliente de la clínica.
   IF v_cli.estado <> 'activo' THEN
-    RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('FORBIDDEN','El acceso al portal está deshabilitado'));
-  END IF;
-
-  IF v_cli.portal_password_hash IS DISTINCT FROM crypt(p_password, v_cli.portal_password_hash) THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('UNAUTHORIZED','Credenciales inválidas'));
   END IF;
 
-  UPDATE core.clientes SET portal_ultimo_login_at = now() WHERE id = v_cli.id;
+  IF v_cli.portal_bloqueado_hasta IS NOT NULL AND v_cli.portal_bloqueado_hasta > now() THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('FORBIDDEN',
+        'Acceso bloqueado temporalmente por intentos fallidos. Intenta en unos minutos.'));
+  END IF;
+
+  IF v_cli.portal_password_hash IS DISTINCT FROM crypt(p_password, v_cli.portal_password_hash) THEN
+    UPDATE core.clientes
+       SET portal_intentos_fallidos = portal_intentos_fallidos + 1,
+           portal_bloqueado_hasta = CASE
+             WHEN portal_intentos_fallidos + 1 >= 5 THEN now() + INTERVAL '15 minutes'
+             ELSE portal_bloqueado_hasta END
+     WHERE id = v_cli.id;
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('UNAUTHORIZED','Credenciales inválidas'));
+  END IF;
+
+  UPDATE core.clientes
+     SET portal_ultimo_login_at = now(),
+         portal_intentos_fallidos = 0,
+         portal_bloqueado_hasta = NULL
+   WHERE id = v_cli.id;
 
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
     'cliente', jsonb_build_object(

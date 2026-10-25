@@ -34,4 +34,6 @@ export class EmitirComprobanteDto {
   @IsOptional() @IsIn(["PEN", "USD"]) moneda?: string;
   @IsOptional() @IsNumber() @Min(0) descuento_global?: number;
   @IsOptional() @IsString() observaciones?: string;
+  /** Generada por el cliente: un doble clic o un reintento no emite dos veces. */
+  @IsOptional() @IsUUID() idempotency_key?: string;
 }

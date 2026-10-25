@@ -20,12 +20,12 @@
 import { TrendingUp, TrendingDown } from "lucide-vue-next";
 
 const BAR_COLOR = {
-  green: "#10B981",
-  amber: "#F59E0B",
-  blue: "#2563EB",
-  violet: "#7C3AED",
-  red: "#EF4444",
-  neutral: "#A0A099"
+  green: "var(--serie-1)",
+  amber: "var(--amber)",
+  blue: "var(--blue)",
+  violet: "var(--violet)",
+  red: "var(--red)",
+  neutral: "var(--ink-4)"
 };
 
 defineProps({

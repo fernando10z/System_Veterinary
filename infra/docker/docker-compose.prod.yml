@@ -1,23 +1,35 @@
 # =============================================================================
 # docker-compose.prod.yml — stack completo en un solo host.
 #
-# Requiere un archivo .env junto a este compose con:
-#   POSTGRES_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, COOKIE_SECRET,
-#   STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY, PUBLIC_API_URL
+# Requiere infra/docker/.env (plantilla: infra/docker/prod.env.example; ver
+# docs/operations/despliegue.md). Arranque:
 #
-# Uso:
 #   docker compose -f infra/docker/docker-compose.prod.yml up -d --build
 #
-# Tras el primer arranque, aplicar el schema:
-#   DB_HOST=localhost DB_PORT=5432 DB_NAME=veterp bash db/scripts/apply-migrations.sh
+# El servicio `migrate` aplica db/migrations/ en cada arranque (son
+# idempotentes) y fija la contraseña de vet_app_user desde VET_APP_PASSWORD.
+# NO carga datos de demostración. El primer super admin se crea una vez con:
+#
+#   docker compose -f infra/docker/docker-compose.prod.yml run --rm migrate \
+#     bash /db/scripts/crear-superadmin.sh
+#
+# Solo `web` publica un puerto. Postgres, Redis, MinIO y el backend quedan en
+# la red interna: el navegador llega a la API por /api y a los archivos por
+# /vet-docs, ambos a través del nginx de `web`.
 # =============================================================================
 
 name: veterp-prod
 
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}
@@ -31,51 +43,194 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    logging: *logging
+    deploy:
+      resources:
+        limits: { memory: 1g, cpus: "2" }
     # Sin `ports`: la BD solo es accesible desde la red interna del compose.
+    # Para un backup desde el host: db/scripts/backup.sh con DB_CONTAINER.
+
+  # Aplica las migraciones y fija la contraseña del rol de la aplicación. Corre
+  # y termina; el backend no arranca hasta que termina bien. Usa la imagen
+  # Debian de Postgres porque los scripts son bash y necesitan psql >= 15.
+  migrate:
+    image: postgres:16
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}
+      DB_NAME: veterp
+      VET_APP_PASSWORD: ${VET_APP_PASSWORD:?define VET_APP_PASSWORD}
+      SEED_DEMO: "0"
+    volumes:
+      - ../../db:/db:ro
+    command: ["bash", "/db/scripts/apply-migrations.sh"]
+    logging: *logging
 
   redis:
     image: redis:7-alpine
-    restart: always
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    restart: unless-stopped
+    # noeviction: aquí viven las sesiones (whitelist de refresh) y el contador
+    # del límite de intentos. Con allkeys-lru, al llenarse la memoria Redis
+    # borraba sesiones válidas y contadores de login sin avisar; con
+    # noeviction rechaza la escritura y el error se ve.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${REDIS_PASSWORD:?define REDIS_PASSWORD}
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+    deploy:
+      resources:
+        limits: { memory: 640m, cpus: "1" }
 
   minio:
-    image: minio/minio:latest
-    restart: always
+    # Versión fija: con `latest` un `docker compose pull` podía cambiar el
+    # servidor de archivos clínicos sin que nadie lo decidiera.
+    # MinIO dejó de publicar imágenes (minio/minio y minio/mc ya no se pueden
+    # descargar de Docker Hub): se usa el fork comunitario de pgsty, mismo
+    # binario, misma CLI y mismo formato de datos.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:?define STORAGE_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:?define STORAGE_SECRET_KEY}
+      # Credencial de administración de MinIO. El backend NO la usa: usa la de
+      # STORAGE_ACCESS_KEY, un usuario limitado al bucket (ver minio-init).
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?define MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?define MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER: "off"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+    deploy:
+      resources:
+        limits: { memory: 1g, cpus: "1" }
+
+  # Crea el bucket y el usuario de la aplicación, con una política que solo
+  # alcanza a ese bucket. Idempotente: corre en cada arranque.
+  minio-init:
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      APP_KEY: ${STORAGE_ACCESS_KEY:?define STORAGE_ACCESS_KEY}
+      APP_SECRET: ${STORAGE_SECRET_KEY:?define STORAGE_SECRET_KEY}
+      BUCKET: vet-docs
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc mb --ignore-existing "local/$$BUCKET"
+        cat > /tmp/veterp-app.json <<EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            { "Effect": "Allow",
+              "Action": ["s3:GetBucketLocation", "s3:ListBucket",
+                         "s3:ListBucketMultipartUploads"],
+              "Resource": ["arn:aws:s3:::$$BUCKET"] },
+            { "Effect": "Allow",
+              "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject",
+                         "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+              "Resource": ["arn:aws:s3:::$$BUCKET/*"] }
+          ]
+        }
+        EOF
+        mc admin policy create local veterp-app /tmp/veterp-app.json
+        mc admin user add local "$$APP_KEY" "$$APP_SECRET"
+        mc admin policy attach local veterp-app --user "$$APP_KEY" 2>/dev/null || true
+        echo "MinIO listo: bucket $$BUCKET, usuario de la aplicación con la política veterp-app."
+    logging: *logging
 
   api:
     build:
       context: ../../backend
       dockerfile: Dockerfile
-    restart: always
+    restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
       redis:
-        condition: service_started
+        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: 3100
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/veterp
+      TZ: America/Lima
+      # vet_app_user: solo EXECUTE sobre app.*. La contraseña debe ser segura
+      # para una URL (hex o base64url): `openssl rand -hex 32`.
+      DATABASE_URL: postgresql://vet_app_user:${VET_APP_PASSWORD}@postgres:5432/veterp
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       STORAGE_ENDPOINT: http://minio:9000
+      # Con esta dirección se firman las URLs de descarga y subida directa: el
+      # navegador llega a MinIO por /vet-docs del mismo dominio.
+      STORAGE_PUBLIC_ENDPOINT: ${PUBLIC_APP_URL:?define PUBLIC_APP_URL}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY}
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY}
       STORAGE_BUCKET: vet-docs
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?define JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?define JWT_REFRESH_SECRET}
+      JWT_REFRESH_EXPIRES: ${JWT_REFRESH_EXPIRES:-7d}
       COOKIE_SECRET: ${COOKIE_SECRET:?define COOKIE_SECRET}
-      CORS_ORIGINS: ${PUBLIC_APP_URL:-http://localhost}
-    ports:
-      - "3100:3100"
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?define ENCRYPTION_KEY}
+      CORS_ORIGINS: ${PUBLIC_APP_URL}
+      # Proxies delante del backend: el nginx de `web` (1). Si además hay un
+      # proxy TLS en el host delante de `web`, son 2. Nunca más que los reales.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      PSE_MODE: ${PSE_MODE:-sandbox}
+      PSE_ENDPOINT: ${PSE_ENDPOINT:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_PRETTY: "false"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging: *logging
+    deploy:
+      resources:
+        limits: { memory: 768m, cpus: "2" }
+    # Sin `ports`: se llega solo a través de `web` (/api).
 
   web:
     build:
@@ -83,11 +238,17 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: ${PUBLIC_API_URL:-/api}
-    restart: always
+    restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
-      - "80:80"
+      # Detrás de un proxy TLS en el mismo host: WEB_PORT=127.0.0.1:8080
+      - "${WEB_PORT:-80}:80"
+    logging: *logging
+    deploy:
+      resources:
+        limits: { memory: 128m, cpus: "0.5" }
 
 volumes:
   postgres_data:

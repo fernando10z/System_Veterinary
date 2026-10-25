@@ -1,5 +1,4 @@
 import { Body, Controller, Get, HttpCode, Post } from "@nestjs/common";
-import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { RefreshDto } from "./dto/refresh.dto";
@@ -10,20 +9,20 @@ import { Public } from "../../common/decorators/public.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { JwtPayload } from "../../common/types/jwt-payload.type";
 
+import { LimiteCredenciales } from "../../common/decorators/limite-credenciales.decorator";
+
 /**
- * Los endpoints que aceptan credenciales llevan un límite propio y estrecho.
- * El global (200/min) sirve para la operación normal, pero deja espacio de sobra
- * para probar contraseñas. La base ya bloquea la cuenta a los 5 intentos; esto
+ * Los endpoints que aceptan credenciales llevan un límite propio y estrecho
+ * (@LimiteCredenciales). La base ya bloquea la cuenta a los 5 intentos; esto
  * frena además el barrido de cuentas distintas desde la misma IP.
  */
-const LIMITE_CREDENCIALES = { default: { limit: 10, ttl: 60_000 } };
 
 @Controller("auth")
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Public()
-  @Throttle(LIMITE_CREDENCIALES)
+  @LimiteCredenciales()
   @HttpCode(200)
   @Post("login")
   async login(@Body() dto: LoginDto) {
@@ -61,17 +60,17 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle(LIMITE_CREDENCIALES)
+  @LimiteCredenciales()
   @HttpCode(200)
   @Post("solicitar-reset")
   async solicitarReset(@Body() dto: SolicitarResetDto) {
-    const data = await this.auth.solicitarReset(dto.email);
+    await this.auth.solicitarReset(dto.email);
     // Nunca se devuelve el token al cliente: viaja por correo.
     return { ok: true, data: { enviado: true } };
   }
 
   @Public()
-  @Throttle(LIMITE_CREDENCIALES)
+  @LimiteCredenciales()
   @HttpCode(200)
   @Post("reset-password")
   async resetPassword(@Body() dto: ResetPasswordDto) {
@@ -81,7 +80,7 @@ export class AuthController {
 
   // ---- Portal del propietario ------------------------------------------------
   @Public()
-  @Throttle(LIMITE_CREDENCIALES)
+  @LimiteCredenciales()
   @HttpCode(200)
   @Post("portal/login")
   async portalLogin(@Body() dto: PortalLoginDto) {

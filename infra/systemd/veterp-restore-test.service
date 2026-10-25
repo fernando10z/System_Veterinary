@@ -1,0 +1,11 @@
+# Restaura el último backup en una base temporal, la comprueba y la borra.
+[Unit]
+Description=ERP Veterinario — prueba de restauración del último backup
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/veterp
+Environment=VETERP_BACKUP_ENV=/etc/veterp/backup.env
+ExecStart=/usr/bin/bash /opt/veterp/db/scripts/restore-test.sh
+Nice=10

@@ -1653,3 +1653,70 @@ ALTER TABLE core.ordenes_servicio
   ADD COLUMN IF NOT EXISTS suscripcion_id UUID REFERENCES core.suscripciones(id) ON DELETE SET NULL;
 ALTER TABLE core.ordenes_servicio
   ADD COLUMN IF NOT EXISTS cubierto_por_plan BOOLEAN NOT NULL DEFAULT false;
+
+-- =============================================================================
+-- INTEGRIDAD QUE NO DEPENDE DE QUE EL SP ACIERTE
+--
+-- Los SPs ya validan todo esto. Las restricciones están para el día en que uno
+-- se equivoque, o en que dos llamadas concurrentes pasen la misma validación a
+-- la vez: la base rechaza el estado imposible en vez de guardarlo.
+--
+-- Cada ALTER va envuelto para que el archivo siga siendo re-aplicable sobre
+-- una base que ya tiene la restricción.
+-- =============================================================================
+DO $$ BEGIN
+  ALTER TABLE core.stock ADD CONSTRAINT ck_stock_no_negativo CHECK (cantidad >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE core.lotes ADD CONSTRAINT ck_lotes_no_negativo CHECK (cantidad >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE core.pago_aplicaciones
+    ADD CONSTRAINT ck_pago_aplicaciones_monto CHECK (monto_aplicado > 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE core.comprobante_items
+    ADD CONSTRAINT ck_comprobante_items_valores
+    CHECK (cantidad > 0 AND precio_unitario >= 0 AND descuento >= 0 AND total >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- -----------------------------------------------------------------------------
+-- Idempotencia de lo que mueve dinero
+--
+-- El cliente genera una clave por intento. Un doble clic, un reintento tras un
+-- timeout o una pestaña duplicada mandan la misma clave, y el SP devuelve el
+-- documento que ya creó en vez de emitir o cobrar dos veces.
+-- -----------------------------------------------------------------------------
+ALTER TABLE core.comprobantes ADD COLUMN IF NOT EXISTS idempotency_key UUID;
+-- Reserva de envío al PSE: ver app.sp_comprobante_reservar_envio.
+ALTER TABLE core.comprobantes ADD COLUMN IF NOT EXISTS envio_en_curso_at TIMESTAMPTZ;
+ALTER TABLE core.pagos        ADD COLUMN IF NOT EXISTS idempotency_key UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_comprobantes_idempotency
+  ON core.comprobantes (empresa_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pagos_idempotency
+  ON core.pagos (empresa_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+-- Número de operación de Yape/Plin/transferencia: el mismo voucher no se
+-- registra dos veces como dos cobros distintos.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pagos_referencia
+  ON core.pagos (empresa_id, metodo, referencia)
+  WHERE referencia IS NOT NULL AND referencia <> '' AND anulado_at IS NULL
+    AND metodo IN ('yape','plin','transferencia','deposito');
+
+-- -----------------------------------------------------------------------------
+-- Índices de los caminos calientes
+-- -----------------------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS ix_comprobantes_ref
+  ON core.comprobantes (documento_ref_id) WHERE documento_ref_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_comprobantes_con_saldo
+  ON core.comprobantes (empresa_id, cliente_id, fecha_emision)
+  WHERE saldo_pendiente > 0 AND anulado_at IS NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_ordenes_servicio_comprobante
+  ON core.ordenes_servicio (comprobante_id) WHERE comprobante_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_insumos_pendientes
+  ON core.insumos_utilizados (empresa_id, mascota_id) WHERE facturado = false;
+CREATE INDEX IF NOT EXISTS ix_suscripcion_consumos_orden
+  ON core.suscripcion_consumos (orden_servicio_id);

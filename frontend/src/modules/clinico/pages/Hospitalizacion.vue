@@ -50,7 +50,7 @@
               <div class="muted">{{ h.especie }} · {{ h.cliente }} · {{ h.cliente_telefono }}</div>
             </div>
             <div class="text-right">
-              <div class="dias mono">{{ h.dias_internado }}</div>
+              <div class="dias cifra">{{ h.dias_internado }}</div>
               <div class="muted" style="font-size: 11px">
                 {{ h.dias_internado === 1 ? "día" : "días" }}
               </div>
@@ -65,7 +65,7 @@
           <div v-if="h.ultima_evolucion" class="ultima-evo">
             <div class="k">Última evolución · {{ fmtFechaHora(h.ultima_evolucion.fecha_hora) }}</div>
             <div class="v">
-              <span v-if="h.ultima_evolucion.temperatura_c" class="tag mono">
+              <span v-if="h.ultima_evolucion.temperatura_c" class="tag cifra">
                 {{ h.ultima_evolucion.temperatura_c }} °C
               </span>
               {{ h.ultima_evolucion.nota }}
@@ -88,22 +88,22 @@
     </div>
 
     <!-- Evolución -->
-    <div v-if="evoFor" class="modal-back" @click="evoFor = null">
+    <div v-if="evoFor" class="modal-back" v-dialogo="() => (evoFor = null)">
       <div class="modal" @click.stop>
         <div class="m-head"><h3>Evolución — {{ evoFor.mascota }}</h3></div>
         <div class="m-body">
           <div class="form-grid">
             <div class="field">
-              <label>Temperatura (°C)</label>
-              <input v-model.number="evo.temperatura_c" type="number" step="0.1" min="25" max="45" />
+              <label for="hospitaliz-temperatura-c">Temperatura (°C)</label>
+              <input id="hospitaliz-temperatura-c" v-model.number="evo.temperatura_c" type="number" step="0.1" min="25" max="45" />
             </div>
             <div class="field">
-              <label>FC (lpm)</label>
-              <input v-model.number="evo.frecuencia_cardiaca" type="number" min="0" />
+              <label for="hospitaliz-frecuencia-cardiaca">FC (lpm)</label>
+              <input id="hospitaliz-frecuencia-cardiaca" v-model.number="evo.frecuencia_cardiaca" type="number" min="0" />
             </div>
             <div class="field">
-              <label>FR (rpm)</label>
-              <input v-model.number="evo.frecuencia_respiratoria" type="number" min="0" />
+              <label for="hospitaliz-frecuencia-respiratoria">FR (rpm)</label>
+              <input id="hospitaliz-frecuencia-respiratoria" v-model.number="evo.frecuencia_respiratoria" type="number" min="0" />
             </div>
           </div>
           <div class="checks">
@@ -112,8 +112,8 @@
             <label class="check-line"><input v-model="evo.defeca" type="checkbox" /> <span>Defeca</span></label>
           </div>
           <div class="field">
-            <label>Nota del turno</label>
-            <textarea v-model="evo.nota" rows="3"></textarea>
+            <label for="hospitaliz-nota">Nota del turno</label>
+            <textarea id="hospitaliz-nota" v-model="evo.nota" rows="3"></textarea>
           </div>
         </div>
         <div class="m-foot modal-actions">
@@ -126,21 +126,21 @@
     </div>
 
     <!-- Alta -->
-    <div v-if="altaFor" class="modal-back" @click="altaFor = null">
+    <div v-if="altaFor" class="modal-back" v-dialogo="() => (altaFor = null)">
       <div class="modal" @click.stop>
         <div class="m-head"><h3>Alta — {{ altaFor.mascota }}</h3></div>
         <div class="m-body">
           <div class="field">
-            <label>Estado de salida</label>
-            <select v-model="alta.estado">
+            <label for="hospitaliz-estado">Estado de salida</label>
+            <select id="hospitaliz-estado" v-model="alta.estado">
               <option value="alta">Alta médica</option>
               <option value="derivado">Derivado a otro centro</option>
               <option value="fallecido">Fallecido</option>
             </select>
           </div>
           <div class="field">
-            <label>Indicaciones al propietario</label>
-            <textarea v-model="alta.indicaciones_alta" rows="4"></textarea>
+            <label for="hospitaliz-indicaciones-alta">Indicaciones al propietario</label>
+            <textarea id="hospitaliz-indicaciones-alta" v-model="alta.indicaciones_alta" rows="4"></textarea>
           </div>
         </div>
         <div class="m-foot modal-actions">
@@ -163,6 +163,7 @@ import { clinicoApi } from "../api/clinico.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtFechaHora, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
 import { abrirDocumento } from "../../../shared/print/abrir-documento.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const { hasPermission } = useAuth();
 const puedeRegistrar = computed(() => hasPermission("clinico:registrar"));
@@ -197,22 +198,45 @@ function abrirAlta(h) {
 }
 
 async function guardarEvolucion() {
+  if (guardando.value) return;
+  // Un número borrado llega como "" y la API lo rechaza: solo viaja lo cargado.
+  const p = { hospitalizacion_id: evoFor.value.id };
+  for (const [k, v] of Object.entries(evo)) {
+    if (v === "" || v === null || v === undefined) continue;
+    p[k] = typeof v === "string" ? v.trim() : v;
+  }
+  const hayDatos = ["temperatura_c", "frecuencia_cardiaca", "frecuencia_respiratoria", "nota"].some((k) => p[k] !== undefined && p[k] !== "")
+    || evo.come || evo.orina || evo.defeca;
+  if (!hayDatos) {
+    notify.warn("Evolución vacía", "Registra al menos una constante o una nota del turno.");
+    return;
+  }
   guardando.value = true;
   try {
-    await clinicoApi.registrarEvolucion({ hospitalizacion_id: evoFor.value.id, ...evo });
+    await clinicoApi.registrarEvolucion(p);
     evoFor.value = null;
     cargar();
+  } catch (e) {
+    notify.error("No se pudo registrar la evolución", e.message);
   } finally {
     guardando.value = false;
   }
 }
 
 async function guardarAlta() {
+  if (guardando.value) return;
+  if (alta.estado === "fallecido" && !(await notify.confirm(
+    `Registrar el fallecimiento de ${altaFor.value.mascota}`,
+    "Cierra la hospitalización con estado fallecido. No se puede deshacer desde aquí.",
+    { confirmText: "Registrar", danger: true, icon: "warning" },
+  ))) return;
   guardando.value = true;
   try {
     await clinicoApi.darAlta(altaFor.value.id, { ...alta });
     altaFor.value = null;
     cargar();
+  } catch (e) {
+    notify.error("No se pudo dar el alta", e.message);
   } finally {
     guardando.value = false;
   }
@@ -223,6 +247,8 @@ async function cargar() {
   try {
     const r = await clinicoApi.hospitalizaciones(todas.value);
     internados.value = r.data ?? [];
+  } catch (e) {
+    notify.toast(`No se pudieron cargar los internados: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }
@@ -244,7 +270,7 @@ onMounted(cargar);
    quedarían a un palmo una de otra, así que se agrupan a la derecha. */
 .hosp-card .module-panel-foot { justify-content: flex-end; }
 .hosp-top .motivo { font-size: 13.5px; font-weight: 600; color: var(--ink); }
-.dias { font-size: 22px; font-weight: 700; color: var(--emerald-deep); line-height: 1; }
+.dias { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; color: var(--emerald-deep); line-height: 1; }
 
 .ultima-evo {
   margin-top: 12px; padding: 10px 12px; border-radius: 9px;

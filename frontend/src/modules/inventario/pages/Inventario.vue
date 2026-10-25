@@ -118,15 +118,15 @@
                       <Snowflake v-if="p.refrigerado" :size="11" class="ico-frio" title="Requiere refrigeración" />
                       <FileWarning v-if="p.requiere_receta" :size="11" class="ico-receta" title="Requiere receta" />
                     </strong>
-                    <small class="muted mono">{{ p.codigo }}{{ p.presentacion ? ` · ${p.presentacion}` : "" }}</small>
+                    <small class="muted codigo">{{ p.codigo }}{{ p.presentacion ? ` · ${p.presentacion}` : "" }}</small>
                   </div>
                 </td>
                 <td><span class="tag">{{ capitalizar(p.tipo) }}</span></td>
-                <td class="num mono">{{ p.stock_actual }} {{ p.unidad_medida }}</td>
-                <td class="num mono muted">{{ p.stock_minimo }}</td>
-                <td class="num mono">{{ fmtSoles(p.precio_compra) }}</td>
-                <td class="num mono">{{ fmtSoles(p.precio_venta) }}</td>
-                <td class="num mono">{{ p.margen_pct ? `${p.margen_pct}%` : "—" }}</td>
+                <td class="num cifra">{{ p.stock_actual }} {{ p.unidad_medida }}</td>
+                <td class="num cifra muted">{{ p.stock_minimo }}</td>
+                <td class="num cifra">{{ fmtSoles(p.precio_compra) }}</td>
+                <td class="num cifra">{{ fmtSoles(p.precio_venta) }}</td>
+                <td class="num cifra">{{ p.margen_pct ? `${p.margen_pct}%` : "—" }}</td>
                 <td>
                   <span :class="['estado-pill', toneStock(p.situacion_stock)]">
                     <span class="dot"></span>{{ labelStock(p.situacion_stock) }}
@@ -134,10 +134,10 @@
                 </td>
                 <td class="acciones-col">
                   <div class="row-actions">
-                    <button v-if="puedeMover" class="btn mini" title="Movimiento" @click="abrirMovimiento(p)">
+                    <button v-if="puedeMover" class="btn mini" title="Movimiento" @click="abrirMovimiento(p)" aria-label="Movimiento">
                       <ArrowLeftRight :size="13" />
                     </button>
-                    <button v-if="puedeGestionar" class="btn mini" title="Editar" @click="abrirEditar(p)">
+                    <button v-if="puedeGestionar" class="btn mini" title="Editar" @click="abrirEditar(p)" aria-label="Editar">
                       <Pencil :size="13" />
                     </button>
                   </div>
@@ -171,9 +171,9 @@
             <tbody>
               <tr v-for="l in lotes" :key="l.lote_id">
                 <td><strong>{{ l.producto }}</strong></td>
-                <td class="mono">{{ l.numero_lote }}</td>
-                <td class="num mono">{{ l.cantidad }}</td>
-                <td class="mono">{{ fmtDate(l.fecha_vencimiento) }}</td>
+                <td class="codigo">{{ l.numero_lote }}</td>
+                <td class="num cifra">{{ l.cantidad }}</td>
+                <td class="cifra">{{ fmtDate(l.fecha_vencimiento) }}</td>
                 <td>
                   <span :class="['estado-pill', (l.dias_restantes ?? -1) < 0 ? 'danger' : 'warn']">
                     {{ (l.dias_restantes ?? -1) < 0 ? "Vencido" : `${l.dias_restantes} días` }}
@@ -202,16 +202,16 @@
             </thead>
             <tbody>
               <tr v-for="m in movimientos" :key="m.id">
-                <td class="mono">{{ fmtFechaHora(m.fecha) }}</td>
-                <td><strong>{{ m.producto }}</strong><br /><small class="muted mono">{{ m.producto_codigo }}</small></td>
+                <td class="cifra">{{ fmtFechaHora(m.fecha) }}</td>
+                <td><strong>{{ m.producto }}</strong><br /><small class="muted codigo">{{ m.producto_codigo }}</small></td>
                 <td>
                   <span :class="['estado-pill', esEntrada(m.tipo) ? 'ok' : 'danger']">
                     <span class="dot"></span>{{ capitalizar(m.tipo) }}
                   </span>
                 </td>
                 <td class="muted">{{ capitalizar(m.motivo) }}</td>
-                <td class="num mono">{{ esEntrada(m.tipo) ? "+" : "−" }}{{ m.cantidad }}</td>
-                <td class="num mono">{{ m.saldo_despues ?? "—" }}</td>
+                <td class="num cifra">{{ esEntrada(m.tipo) ? "+" : "−" }}{{ m.cantidad }}</td>
+                <td class="num cifra">{{ m.saldo_despues ?? "—" }}</td>
                 <td class="muted">{{ m.usuario || "—" }}</td>
               </tr>
             </tbody>
@@ -253,6 +253,7 @@ import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtSoles, fmtDate } from "../../../shared/components/ui/format.js";
 import { fmtFechaHora, capitalizar } from "../../../shared/components/ui/format.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const { hasPermission } = useAuth();
 const puedeGestionar = computed(() => hasPermission("inventario:gestionar"));
@@ -334,6 +335,8 @@ async function cargar() {
     meta.value = prod.meta ?? {};
     alertas.value = al.data ?? {};
     if (tab.value === "kardex") await verKardex();
+  } catch (e) {
+    notify.toast(`No se pudo cargar el inventario: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }
@@ -357,7 +360,7 @@ onMounted(async () => {
   padding: 12px 14px; border-radius: 12px;
   background: var(--bg-elev); border: 1px solid var(--line);
 }
-.alerta-card .n { font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.alerta-card .n { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.1; }
 .alerta-card .l { font-size: 11.5px; color: var(--ink-3); }
 .alerta-card .btn { margin-left: auto; }
 .alerta-card.danger { border-left: 3px solid var(--red); color: var(--red-ink); }

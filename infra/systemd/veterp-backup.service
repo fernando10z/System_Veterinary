@@ -1,0 +1,24 @@
+# =============================================================================
+# Backup diario del ERP (base + archivos de MinIO). Lo dispara veterp-backup.timer.
+#
+#   sudo cp infra/systemd/veterp-backup.* /etc/systemd/system/
+#   sudo install -m 600 /dev/null /etc/veterp/backup.env   # y completarlo
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now veterp-backup.timer veterp-restore-test.timer
+#
+# Ver el resultado:  journalctl -u veterp-backup.service  ·  db/backups/backup.log
+# =============================================================================
+[Unit]
+Description=ERP Veterinario — backup de base y archivos
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/veterp
+Environment=VETERP_BACKUP_ENV=/etc/veterp/backup.env
+ExecStart=/usr/bin/bash /opt/veterp/db/scripts/backup.sh
+# Si falla, systemd lo marca como failed: `systemctl --failed` lo muestra y
+# OnFailure= puede avisar (p. ej. una unidad que mande un correo).
+Nice=10
+IOSchedulingClass=idle

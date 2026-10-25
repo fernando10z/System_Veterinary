@@ -1,0 +1,111 @@
+# =============================================================================
+# CI — el ERP completo, de la base al frontend, en cada push y PR.
+#
+# La infraestructura se levanta con el MISMO compose de desarrollo (y no con
+# `services:` de GitHub): los scripts de verificación hablan con
+# veterp_postgres_dev por `docker exec` y con los puertos 5435/6382/9102, así
+# que el CI corre exactamente lo que corre un desarrollador.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  erp:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      VET_APP_PASSWORD: ci_vet_app_0123456789abcdef
+      TMPDIR: /tmp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      # ---- Infraestructura -------------------------------------------------
+      - name: Postgres 16, Redis y MinIO (compose de desarrollo)
+        run: |
+          docker compose -f infra/docker/docker-compose.dev.yml up -d
+          for i in $(seq 1 60); do
+            s=$(docker inspect -f '{{.State.Health.Status}}' veterp_postgres_dev 2>/dev/null || true)
+            [ "$s" = healthy ] && break; sleep 2
+          done
+          docker compose -f infra/docker/docker-compose.dev.yml ps
+
+      - name: Migraciones + datos de demostración
+        run: SEED_DEMO=1 bash db/scripts/apply-migrations.sh
+
+      - name: Reaplicar migraciones (deben ser idempotentes)
+        run: bash db/scripts/apply-migrations.sh
+
+      # ---- Backend ---------------------------------------------------------
+      - name: Backend — instalar, compilar y tests unitarios
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build
+          npm test
+
+      - name: Backend — arrancar
+        working-directory: backend
+        run: |
+          cp .env.example .env
+          sed -i "s#^DATABASE_URL=.*#DATABASE_URL=postgresql://vet_app_user:${VET_APP_PASSWORD}@localhost:5435/vet_demo#" .env
+          sed -i "s#^LOG_PRETTY=.*#LOG_PRETTY=false#" .env
+          nohup node dist/main > ../api.log 2>&1 &
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3100/api/health || true)
+            [ "$code" = 200 ] && break; sleep 2
+          done
+          curl -sf http://localhost:3100/api/health
+
+      # ---- Verificación funcional -----------------------------------------
+      - name: verificar-api.sh (rutas, aislamiento entre empresas, roles, archivos)
+        run: |
+          bash scripts/verificar-api.sh | tee verificar.out
+          grep -q "FALLOS: 0" verificar.out
+
+      - name: flujo-clinico.sh (cita → consulta → boleta → cobro → caja)
+        run: |
+          bash scripts/flujo-clinico.sh | tee flujo.out
+          # El script imprime cada respuesta: ninguna puede ser un rechazo.
+          if grep -q '"ok":false' flujo.out; then
+            echo "::error::flujo-clinico.sh recibió una respuesta con ok:false"; exit 1
+          fi
+
+      - name: verificar-concurrencia.sh
+        run: |
+          if [ -f scripts/verificar-concurrencia.sh ]; then
+            bash scripts/verificar-concurrencia.sh
+          else
+            echo "scripts/verificar-concurrencia.sh no existe todavía: se omite."
+          fi
+
+      # ---- Frontend --------------------------------------------------------
+      - name: Frontend — instalar y compilar
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      # ---- Diagnóstico -----------------------------------------------------
+      - name: Log del backend
+        if: failure()
+        run: tail -n 300 api.log || true
+
+      - name: Parar la infraestructura
+        if: always()
+        run: docker compose -f infra/docker/docker-compose.dev.yml down -v

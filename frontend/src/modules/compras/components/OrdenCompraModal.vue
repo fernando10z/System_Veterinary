@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal modal-xwide" @click.stop>
       <div class="m-head"><h3>Nueva orden de compra</h3></div>
 
@@ -10,19 +10,19 @@
 
         <div class="form-grid">
           <div class="field">
-            <label>Proveedor <span class="req">*</span></label>
-            <select v-model="form.proveedor_id">
+            <label for="ordencompr-proveedor-id">Proveedor <span class="req">*</span></label>
+            <select id="ordencompr-proveedor-id" v-model="form.proveedor_id">
               <option value="">Seleccionar…</option>
               <option v-for="p in proveedores" :key="p.id" :value="p.id">{{ p.razon_social }}</option>
             </select>
           </div>
           <div class="field">
-            <label>Fecha estimada de entrega</label>
-            <input v-model="form.fecha_estimada" type="date" />
+            <label for="ordencompr-fecha-estimada">Fecha estimada de entrega</label>
+            <input id="ordencompr-fecha-estimada" v-model="form.fecha_estimada" type="date" />
           </div>
           <div class="field">
-            <label>Estado inicial</label>
-            <select v-model="form.estado">
+            <label for="ordencompr-estado">Estado inicial</label>
+            <select id="ordencompr-estado" v-model="form.estado">
               <option value="borrador">Borrador</option>
               <option value="enviada">Enviada al proveedor</option>
             </select>
@@ -50,9 +50,9 @@
                 <td class="num"><input v-model.number="it.precio_unitario" type="number" min="0" step="0.01" class="mini-input" /></td>
                 <td><input v-model.trim="it.numero_lote" type="text" class="mini-input" placeholder="opcional" /></td>
                 <td><input v-model="it.fecha_vencimiento" type="date" class="mini-input" /></td>
-                <td class="num mono">{{ fmtSoles(subtotal(it)) }}</td>
+                <td class="num cifra">{{ fmtSoles(subtotal(it)) }}</td>
                 <td class="acciones-col">
-                  <button class="btn mini" :disabled="items.length === 1" @click="items.splice(i, 1)">
+                  <button class="btn mini" :disabled="items.length === 1" aria-label="Quitar ítem" title="Quitar ítem" @click="items.splice(i, 1)">
                     <Trash2 :size="13" />
                   </button>
                 </td>
@@ -66,9 +66,9 @@
         </button>
 
         <div class="totales">
-          <div><span>Subtotal</span><span class="mono">{{ fmtSoles(totales.subtotal) }}</span></div>
-          <div><span>IGV (18%)</span><span class="mono">{{ fmtSoles(totales.igv) }}</span></div>
-          <div class="total"><span>Total</span><span class="mono">{{ fmtSoles(totales.total) }}</span></div>
+          <div><span>Subtotal</span><span class="cifra">{{ fmtSoles(totales.subtotal) }}</span></div>
+          <div><span>IGV ({{ Math.round(igvTasa * 10000) / 100 }}%)</span><span class="cifra">{{ fmtSoles(totales.igv) }}</span></div>
+          <div class="total"><span>Total</span><span class="cifra">{{ fmtSoles(totales.total) }}</span></div>
         </div>
       </div>
 
@@ -87,6 +87,7 @@ import { reactive, ref, computed } from "vue";
 import { AlertCircle, Plus, Trash2 } from "lucide-vue-next";
 import { comprasApi } from "../api/compras.api.js";
 import { fmtSoles } from "../../../shared/components/ui/format.js";
+import { useEmpresa } from "../../../shared/composables/useEmpresa.js";
 
 const props = defineProps({
   proveedores: { type: Array, default: () => [] },
@@ -97,6 +98,7 @@ const emit = defineEmits(["close", "guardado"]);
 const guardando = ref(false);
 const error = ref("");
 
+const { igvTasa } = useEmpresa();
 const form = reactive({ proveedor_id: "", fecha_estimada: "", estado: "borrador" });
 const items = ref([nuevoItem()]);
 
@@ -117,7 +119,7 @@ function subtotal(it) {
 
 const totales = computed(() => {
   const sub = items.value.reduce((s, it) => s + subtotal(it), 0);
-  const igv = Math.round(sub * 0.18 * 100) / 100;
+  const igv = Math.round(sub * igvTasa.value * 100) / 100;
   return { subtotal: sub, igv, total: sub + igv };
 });
 

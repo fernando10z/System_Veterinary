@@ -140,11 +140,11 @@
               <td>
                 <div class="stack">
                   <span>{{ p.propietario }}</span>
-                  <small class="muted mono">{{ p.propietario_telefono || "—" }}</small>
+                  <small class="muted codigo">{{ p.propietario_telefono || "—" }}</small>
                 </div>
               </td>
               <td>{{ p.edad?.texto || "—" }}</td>
-              <td class="num mono">{{ p.peso_kg ? `${p.peso_kg} kg` : "—" }}</td>
+              <td class="num cifra">{{ p.peso_kg ? `${p.peso_kg} kg` : "—" }}</td>
               <td>
                 <span v-if="p.ultima_visita" :title="fmtFechaHora(p.ultima_visita)">
                   {{ fmtRelativo(p.ultima_visita) }}
@@ -167,10 +167,10 @@
               </td>
               <td class="acciones-col" @click.stop>
                 <div class="row-actions">
-                  <button class="btn mini" title="Ver ficha" @click="$router.push(`/pacientes/${p.id}`)">
+                  <button class="btn mini" title="Ver ficha" @click="$router.push(`/pacientes/${p.id}`)" aria-label="Ver ficha">
                     <FileText :size="13" />
                   </button>
-                  <button v-if="puedeEditar" class="btn mini" title="Editar" @click="abrirEditar(p)">
+                  <button v-if="puedeEditar" class="btn mini" title="Editar" @click="abrirEditar(p)" aria-label="Editar">
                     <Pencil :size="13" />
                   </button>
                 </div>
@@ -212,6 +212,7 @@ import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtDate } from "../../../shared/components/ui/format.js";
 import { fmtFechaHora, fmtRelativo, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
+import { parseFecha, hoyISO } from "@/shared/utils/fechas.js";
 
 const { hasPermission } = useAuth();
 const puedeCrear = computed(() => hasPermission("mascotas:crear"));
@@ -237,10 +238,10 @@ const conAlergia = computed(
 const sinVisita = computed(() => {
   const limite = new Date();
   limite.setMonth(limite.getMonth() - 6);
-  return pacientes.value.filter((p) => !p.ultima_visita || new Date(p.ultima_visita) < limite).length;
+  return pacientes.value.filter((p) => !p.ultima_visita || parseFecha(p.ultima_visita) < limite).length;
 });
 
-function vencida(f) { return new Date(f) < new Date(); }
+function vencida(f) { return String(f).slice(0, 10) < hoyISO(); }
 function sexoLabel(s) { return { macho: "Macho", hembra: "Hembra" }[s] || "Sexo no registrado"; }
 function toneEstado(e) {
   return { activo: "ok", inactivo: "neutral", fallecido: "neutral", extraviado: "danger" }[e] || "neutral";

@@ -1,3 +1,4 @@
+import { Vaciable } from "../../../common/decorators/vaciable.decorator";
 import {
   IsBoolean, IsDateString, IsEmail, IsIn, IsInt, IsNumber, IsOptional, IsString,
   MaxLength, Min,
@@ -10,10 +11,10 @@ export class ActualizarClienteDto {
   @IsOptional() @IsString() @MaxLength(255) razon_social?: string;
   @IsOptional() @IsString() @MaxLength(30) telefono?: string;
   @IsOptional() @IsString() @MaxLength(30) telefono_alterno?: string;
-  @IsOptional() @IsEmail({}, { message: "Ingresa un correo válido" }) correo?: string;
+  @Vaciable() @IsEmail({}, { message: "Ingresa un correo válido" }) correo?: string;
   @IsOptional() @IsString() direccion?: string;
   @IsOptional() @IsString() @MaxLength(6) ubigeo?: string;
-  @IsOptional() @IsDateString() fecha_nacimiento?: string;
+  @Vaciable() @IsDateString() fecha_nacimiento?: string;
   @IsOptional() @IsNumber() @Min(0) linea_credito?: number;
   @IsOptional() @IsInt() @Min(0) dias_credito?: number;
   @IsOptional() @IsBoolean() acepta_marketing?: boolean;

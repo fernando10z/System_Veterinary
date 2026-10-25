@@ -23,7 +23,7 @@ import { computed } from "vue";
 
 const props = defineProps({
   points: { type: Array, required: true },
-  stroke: { type: String, default: "var(--emerald)" },
+  stroke: { type: String, default: "var(--serie-1)" },
   width: { type: Number, default: 64 },
   height: { type: Number, default: 22 },
 });

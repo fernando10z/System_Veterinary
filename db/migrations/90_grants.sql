@@ -7,7 +7,9 @@
 
 -- El rol se crea SIN contraseña utilizable: una aleatoria que nadie conoce.
 -- Así, si alguien despliega y olvida el paso del deploy, el rol no queda con una
--- contraseña adivinable — simplemente no se puede usar hasta fijarla:
+-- contraseña adivinable — simplemente no se puede usar hasta fijarla.
+-- La fija `apply-migrations.sh` cuando recibe VET_APP_PASSWORD (el compose de
+-- producción lo hace en cada arranque); a mano:
 --   ALTER ROLE vet_app_user WITH PASSWORD '<secreto del gestor de credenciales>';
 DO $$
 BEGIN
@@ -25,6 +27,17 @@ BEGIN
 END $$;
 
 GRANT USAGE ON SCHEMA app TO vet_app_user;
+
+-- Postgres concede EXECUTE a PUBLIC sobre toda función nueva. Con eso, cualquier
+-- rol que llegue a conectarse —uno de solo lectura para reportes, el de un
+-- backup, uno creado a mano para depurar— podía llamar a los SPs de app.* y,
+-- como son SECURITY DEFINER, actuar con los privilegios del owner. EXECUTE se
+-- concede solo a quien se nombra.
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA app FROM PUBLIC;
+-- También para las que se creen después. Tiene que ser el default global (sin
+-- IN SCHEMA): los defaults por schema solo pueden AÑADIR privilegios a los
+-- globales, no quitarlos.
+ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 -- Las funciones son SECURITY DEFINER: corren con los privilegios del owner y
 -- son las únicas que tocan core/internal.

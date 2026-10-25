@@ -45,7 +45,9 @@ services:
     image: redis:7-alpine
     container_name: veterp_redis_dev
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    # noeviction, igual que en producción: aquí viven sesiones y contadores de
+    # login, que no se pueden perder en silencio por falta de memoria.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
     ports:
       - "6382:6379"
     volumes:
@@ -57,7 +59,8 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # minio/minio ya no se publica en Docker Hub: fork comunitario de pgsty.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: veterp_minio_dev
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -72,7 +75,7 @@ services:
       - minio_data:/data
 
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
     container_name: veterp_minio_init_dev
     depends_on:
       - minio

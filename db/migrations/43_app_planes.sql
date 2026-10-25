@@ -275,6 +275,7 @@ DECLARE
   v_meses   INT;
   v_inicio  DATE := COALESCE(NULLIF(p_payload->>'fecha_inicio','')::date, CURRENT_DATE);
   v_precio  NUMERIC(12,2);
+  v_cuota   UUID;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'planes:vender');
   PERFORM internal.validar_payload(p_payload, ARRAY['plan_id','mascota_id']);
@@ -357,11 +358,18 @@ BEGIN
     p_user_id)
   RETURNING id INTO v_id;
 
+  -- La primera cuota se carga al contratar; las siguientes, el trabajo diario
+  -- (sp_suscripciones_vencer) cuando llega proximo_cobro. `cobrar_cuota:false`
+  -- es para migrar planes que ya se cobraron fuera del sistema.
+  IF COALESCE((p_payload->>'cobrar_cuota')::boolean, true) THEN
+    v_cuota := internal.cargar_cuota_plan(v_id, p_user_id, v_inicio);
+  END IF;
+
   PERFORM internal.registrar_auditoria(
     p_user_id, v_emp, 'crear', 'suscripciones', v_id, NULL, p_payload);
 
   RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object(
-    'id', v_id, 'plan', v_plan.nombre, 'precio', v_precio));
+    'id', v_id, 'plan', v_plan.nombre, 'precio', v_precio, 'orden_cuota_id', v_cuota));
 
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));
@@ -560,10 +568,58 @@ END;
 $$;
 
 -- -----------------------------------------------------------------------------
--- app.sp_suscripciones_vencer — cierra las que pasaron de fecha
+-- internal.procesar_suscripciones — cuotas que tocan y planes que vencen
 --
--- Sin esto, una suscripción vencida sigue en 'activa' y sigue cubriendo. Se
--- llama desde el trabajo diario del backend, y es idempotente.
+-- Lo que tiene que pasar cada día con los planes de una empresa. Idempotente:
+-- correrlo dos veces el mismo día no carga dos cuotas ni cambia nada más.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.procesar_suscripciones(
+  p_empresa_id UUID,
+  p_user_id    UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_n      INT;
+  v_cuotas INT := 0;
+  v_s      RECORD;
+  v_periodo DATE;
+BEGIN
+  -- Cuotas que tocan: una por cada periodo vencido dentro de la vigencia. El
+  -- bucle cubre el caso de un servidor apagado varios días: no se salta
+  -- ninguna, y cargar_cuota_plan no repite las que ya existen.
+  FOR v_s IN
+    SELECT id, proximo_cobro, fecha_fin, periodicidad FROM core.suscripciones
+     WHERE empresa_id = p_empresa_id AND estado = 'activa'
+       AND proximo_cobro IS NOT NULL AND proximo_cobro <= CURRENT_DATE
+       AND proximo_cobro <= fecha_fin
+     FOR UPDATE
+  LOOP
+    v_periodo := v_s.proximo_cobro;
+    WHILE v_periodo <= CURRENT_DATE AND v_periodo <= v_s.fecha_fin LOOP
+      IF internal.cargar_cuota_plan(v_s.id, p_user_id, v_periodo) IS NOT NULL THEN
+        v_cuotas := v_cuotas + 1;
+      END IF;
+      v_periodo := internal.siguiente_periodo_plan(v_periodo, v_s.periodicidad);
+    END LOOP;
+    UPDATE core.suscripciones SET proximo_cobro = v_periodo WHERE id = v_s.id;
+  END LOOP;
+
+  -- Sin esto, una suscripción vencida sigue en 'activa' y sigue cubriendo.
+  UPDATE core.suscripciones
+     SET estado = 'vencida'
+   WHERE empresa_id = p_empresa_id AND estado = 'activa' AND fecha_fin < CURRENT_DATE;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+
+  RETURN jsonb_build_object('vencidas', v_n, 'cuotas_generadas', v_cuotas);
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- app.sp_suscripciones_vencer — el mismo proceso, a pedido, para una empresa
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.sp_suscripciones_vencer(
   p_user_id        UUID,
@@ -577,16 +633,47 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
-  v_n   INT;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'planes:ver');
 
-  UPDATE core.suscripciones
-     SET estado = 'vencida'
-   WHERE empresa_id = v_emp AND estado = 'activa' AND fecha_fin < CURRENT_DATE;
-  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN jsonb_build_object('ok', true,
+    'data', internal.procesar_suscripciones(v_emp, p_user_id));
 
-  RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('vencidas', v_n));
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- app.sp_tareas_diarias — el trabajo de madrugada del ERP
+--
+-- La llama el backend una vez al día (y al arrancar), sin usuario: no hay
+-- nadie sentado delante. Por eso no comprueba permisos, y por eso solo hace
+-- lo que ya tocaba hacer —cargar las cuotas vencidas, cerrar los planes que
+-- pasaron de fecha—: llamarla de más no cambia nada.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.sp_tareas_diarias()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, app, internal, public
+AS $$
+DECLARE
+  v_e   RECORD;
+  v_res JSONB := '[]'::jsonb;
+BEGIN
+  -- Una sola ejecución a la vez aunque haya varias instancias del backend.
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('tareas_diarias', 0)) THEN
+    RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('omitido', 'en curso'));
+  END IF;
+
+  FOR v_e IN SELECT id FROM core.empresas WHERE deleted_at IS NULL LOOP
+    v_res := v_res || jsonb_build_array(
+      jsonb_build_object('empresa_id', v_e.id)
+      || internal.procesar_suscripciones(v_e.id, NULL));
+  END LOOP;
+
+  RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('empresas', v_res));
 
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));

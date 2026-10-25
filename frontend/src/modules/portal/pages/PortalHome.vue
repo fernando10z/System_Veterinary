@@ -97,7 +97,7 @@
                 <tbody>
                   <tr v-for="(v, i) in historial.vacunas" :key="i">
                     <td><strong>{{ v.nombre_vacuna }}</strong></td>
-                    <td class="mono">{{ fmtDate(v.fecha_aplicacion) }}</td>
+                    <td class="cifra">{{ fmtDate(v.fecha_aplicacion) }}</td>
                     <td>
                       <span v-if="!v.proximo_refuerzo" class="muted">—</span>
                       <span v-else :class="['estado-pill', v.vencida ? 'danger' : 'ok']">
@@ -148,7 +148,7 @@
               <thead><tr><th>Fecha</th><th>Mascota</th><th>Servicio</th><th>Veterinario</th><th>Clínica</th><th>Estado</th></tr></thead>
               <tbody>
                 <tr v-for="c in citas" :key="c.id">
-                  <td class="mono">{{ fmtFechaHora(c.fecha_hora) }}</td>
+                  <td class="cifra">{{ fmtFechaHora(c.fecha_hora) }}</td>
                   <td><strong>{{ c.mascota }}</strong></td>
                   <td>{{ c.servicio || c.motivo || "—" }}</td>
                   <td class="muted">{{ c.veterinario || "Por asignar" }}</td>
@@ -185,11 +185,11 @@
               <thead><tr><th>Comprobante</th><th>Fecha</th><th>Mascota</th><th class="num">Total</th><th class="num">Saldo</th><th>Estado</th></tr></thead>
               <tbody>
                 <tr v-for="c in comprobantes" :key="c.id">
-                  <td class="mono"><strong>{{ c.numero_completo }}</strong></td>
-                  <td class="mono">{{ fmtDate(c.fecha_emision) }}</td>
+                  <td class="codigo"><strong>{{ c.numero_completo }}</strong></td>
+                  <td class="cifra">{{ fmtDate(c.fecha_emision) }}</td>
                   <td>{{ c.mascota || "—" }}</td>
-                  <td class="num mono">{{ fmtSoles(c.total) }}</td>
-                  <td class="num mono">{{ fmtSoles(c.saldo_pendiente) }}</td>
+                  <td class="num cifra">{{ fmtSoles(c.total) }}</td>
+                  <td class="num cifra">{{ fmtSoles(c.saldo_pendiente) }}</td>
                   <td>
                     <span :class="['estado-pill', c.estado_pago === 'pagado' ? 'ok' : 'warn']">
                       <span class="dot"></span>{{ capitalizar(c.estado_pago) }}

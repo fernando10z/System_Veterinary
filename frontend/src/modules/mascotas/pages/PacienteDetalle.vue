@@ -83,7 +83,7 @@
                 <div><span class="k">Peso</span><span class="v">{{ p.peso_kg ? `${p.peso_kg} kg` : "—" }}</span></div>
                 <div><span class="k">Color</span><span class="v">{{ p.color || "—" }}</span></div>
                 <div><span class="k">Esterilizado</span><span class="v">{{ p.esterilizado ? "Sí" : "No" }}</span></div>
-                <div><span class="k">Microchip</span><span class="v mono">{{ p.microchip || "—" }}</span></div>
+                <div><span class="k">Microchip</span><span class="v codigo">{{ p.microchip || "—" }}</span></div>
               </div>
             </div>
           </section>
@@ -127,13 +127,13 @@
                 <div class="avatar-sm">{{ iniciales(p.propietario.nombre_completo) }}</div>
                 <div>
                   <strong>{{ p.propietario.nombre_completo }}</strong>
-                  <small class="mono">{{ p.propietario.numero_documento }}</small>
+                  <small class="codigo">{{ p.propietario.numero_documento }}</small>
                 </div>
               </router-link>
               <div class="detalle-grid" style="margin-top: 12px">
                 <div class="detalle-item">
                   <div class="k">Teléfono</div>
-                  <div class="v mono">{{ p.propietario.telefono || "—" }}</div>
+                  <div class="v codigo">{{ p.propietario.telefono || "—" }}</div>
                 </div>
                 <div class="detalle-item">
                   <div class="k">Correo</div>
@@ -154,7 +154,7 @@
               </svg>
               <div class="peso-pies">
                 <span>{{ fmtDate(p.curva_peso[0].fecha) }}</span>
-                <span class="mono">{{ pesoMin }}–{{ pesoMax }} kg</span>
+                <span class="codigo">{{ pesoMin }}–{{ pesoMax }} kg</span>
                 <span>{{ fmtDate(p.curva_peso[p.curva_peso.length - 1].fecha) }}</span>
               </div>
             </div>
@@ -250,14 +250,14 @@
                   <tr v-for="v in p.vacunas" :key="v.id">
                     <td><strong>{{ v.nombre_vacuna }}</strong></td>
                     <td>{{ fmtDate(v.fecha_aplicacion) }}</td>
-                    <td class="mono">{{ v.dosis_numero }}</td>
+                    <td class="codigo">{{ v.dosis_numero }}</td>
                     <td>
                       <span v-if="!v.proximo_refuerzo" class="muted">—</span>
                       <span v-else :class="['estado-pill', v.vencida ? 'danger' : 'ok']">
                         {{ fmtDate(v.proximo_refuerzo) }}
                       </span>
                     </td>
-                    <td class="mono muted">{{ v.lote || "—" }}</td>
+                    <td class="codigo muted">{{ v.lote || "—" }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -334,6 +334,7 @@ import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtDate, fmtSoles } from "../../../shared/components/ui/format.js";
 import { abrirDocumento } from "../../../shared/print/abrir-documento.js";
 import { fmtFechaHora, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -406,6 +407,8 @@ async function cargar() {
       cargarPlan(),
     ]);
     p.value = ficha.data;
+  } catch (e) {
+    notify.toast(`No se pudo cargar el paciente: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }
@@ -453,7 +456,7 @@ watch(() => route.params.id, cargar);
 .col-izq, .col-der { display: flex; flex-direction: column; gap: 16px; }
 
 .ficha-id { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 22px 18px; }
-.ficha-nombre { font-size: 19px; font-weight: 700; color: var(--ink); margin-top: 12px; letter-spacing: -0.02em; }
+.ficha-nombre { font-family: var(--font-display); font-size: 19px; font-weight: 700; color: var(--ink); margin-top: 12px; letter-spacing: -0.01em; }
 .ficha-sub { font-size: 12.5px; color: var(--ink-3); }
 
 .ficha-datos {

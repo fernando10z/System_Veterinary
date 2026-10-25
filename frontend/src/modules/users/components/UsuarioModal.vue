@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal modal-wide" @click.stop>
       <div class="m-head"><h3>{{ esEdicion ? "Editar usuario" : "Nuevo usuario" }}</h3></div>
 
@@ -10,45 +10,45 @@
 
         <div class="form-grid">
           <div class="field">
-            <label>Nombres <span class="req">*</span></label>
-            <input v-model.trim="form.nombres" type="text" />
+            <label for="usuariomod-nombres">Nombres <span class="req">*</span></label>
+            <input id="usuariomod-nombres" v-model.trim="form.nombres" type="text" />
           </div>
           <div class="field">
-            <label>Apellido paterno <span class="req">*</span></label>
-            <input v-model.trim="form.apellido_paterno" type="text" />
+            <label for="usuariomod-apellido-paterno">Apellido paterno <span class="req">*</span></label>
+            <input id="usuariomod-apellido-paterno" v-model.trim="form.apellido_paterno" type="text" />
           </div>
           <div class="field">
-            <label>Apellido materno</label>
-            <input v-model.trim="form.apellido_materno" type="text" />
+            <label for="usuariomod-apellido-materno">Apellido materno</label>
+            <input id="usuariomod-apellido-materno" v-model.trim="form.apellido_materno" type="text" />
           </div>
           <div class="field">
-            <label>Tipo de documento</label>
-            <select v-model="form.tipo_documento">
+            <label for="usuariomod-tipo-documento">Tipo de documento</label>
+            <select id="usuariomod-tipo-documento" v-model="form.tipo_documento">
               <option value="DNI">DNI</option>
               <option value="CE">Carné de extranjería</option>
               <option value="PASAPORTE">Pasaporte</option>
             </select>
           </div>
           <div class="field">
-            <label>Número <span class="req">*</span></label>
-            <input v-model.trim="form.numero_documento" type="text" />
+            <label for="usuariomod-numero-documento">Número <span class="req">*</span></label>
+            <input id="usuariomod-numero-documento" v-model.trim="form.numero_documento" type="text" />
           </div>
           <div class="field">
-            <label>Teléfono</label>
-            <input v-model.trim="form.telefono" type="tel" />
+            <label for="usuariomod-telefono">Teléfono</label>
+            <input id="usuariomod-telefono" v-model.trim="form.telefono" type="tel" />
           </div>
           <div class="field">
-            <label>Correo <span class="req">*</span></label>
-            <input v-model.trim="form.email" type="email" :disabled="esEdicion" />
+            <label for="usuariomod-email">Correo <span class="req">*</span></label>
+            <input id="usuariomod-email" v-model.trim="form.email" type="email" :disabled="esEdicion" />
           </div>
           <div v-if="!esEdicion" class="field">
-            <label>Contraseña temporal <span class="req">*</span></label>
-            <input v-model="form.password" type="text" placeholder="Mínimo 8 caracteres" />
+            <label for="usuariomod-password">Contraseña temporal <span class="req">*</span></label>
+            <input id="usuariomod-password" v-model="form.password" type="text" placeholder="Mínimo 8 caracteres" />
             <small class="muted">El usuario deberá cambiarla al ingresar.</small>
           </div>
           <div v-if="!esEdicion" class="field">
-            <label>Rol</label>
-            <select v-model="form.rol_id" @change="onRol">
+            <label for="usuariomod-rol-id">Rol</label>
+            <select id="usuariomod-rol-id" v-model="form.rol_id" @change="onRol">
               <option value="">Sin rol</option>
               <option v-for="r in roles" :key="r.id" :value="r.id">
                 {{ r.nombre }} ({{ labelScope(r.scope) }})
@@ -56,8 +56,8 @@
             </select>
           </div>
           <div v-if="!esEdicion && rolRequiereEmpresa" class="field">
-            <label>Empresa <span class="req">*</span></label>
-            <select v-model="form.empresa_id">
+            <label for="usuariomod-empresa-id">Empresa <span class="req">*</span></label>
+            <select id="usuariomod-empresa-id" v-model="form.empresa_id">
               <option value="">Seleccionar…</option>
               <option v-for="e in empresas" :key="e.id" :value="e.id">
                 {{ e.nombre_comercial || e.razon_social }}
@@ -74,20 +74,20 @@
 
         <div v-if="form.es_veterinario" class="form-grid">
           <div class="field">
-            <label>Colegiatura <span class="req">*</span></label>
-            <input v-model.trim="form.colegiatura" type="text" placeholder="CMVP-0000" />
+            <label for="usuariomod-colegiatura">Colegiatura <span class="req">*</span></label>
+            <input id="usuariomod-colegiatura" v-model.trim="form.colegiatura" type="text" placeholder="CMVP-0000" />
             <small class="muted">Necesaria para firmar la historia clínica.</small>
           </div>
           <div class="field">
-            <label>Especialidad</label>
-            <select v-model="form.especializacion_id">
+            <label for="usuariomod-especializacion-id">Especialidad</label>
+            <select id="usuariomod-especializacion-id" v-model="form.especializacion_id">
               <option value="">Sin especialidad</option>
               <option v-for="e in especializaciones" :key="e.id" :value="e.id">{{ e.nombre }}</option>
             </select>
           </div>
           <div class="field">
-            <label>Color en la agenda</label>
-            <input v-model="form.color_agenda" type="color" class="color-input" />
+            <label for="usuariomod-color-agenda">Color en la agenda</label>
+            <input id="usuariomod-color-agenda" v-model="form.color_agenda" type="color" class="color-input" />
           </div>
         </div>
       </div>
@@ -133,7 +133,7 @@ const form = reactive({
   es_veterinario: props.usuario?.es_veterinario ?? false,
   colegiatura: props.usuario?.colegiatura ?? "",
   especializacion_id: props.usuario?.especializacion_id ?? "",
-  color_agenda: props.usuario?.color_agenda ?? "#07B162",
+  color_agenda: props.usuario?.color_agenda ?? "#178A72",
 });
 
 /** Un rol de alcance global no se ancla a una empresa: el backend la exige NULL. */

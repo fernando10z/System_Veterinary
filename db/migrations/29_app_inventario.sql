@@ -221,11 +221,32 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'inventario:mover');
   PERFORM internal.validar_payload(p_payload, ARRAY['producto_id','tipo','motivo','cantidad']);
 
-  IF NOT EXISTS (SELECT 1 FROM core.productos
-                  WHERE id = (p_payload->>'producto_id')::uuid AND deleted_at IS NULL
-                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+  -- La empresa del movimiento es la del producto (un super admin no tiene
+  -- empresa propia); almacén, lote y destino los valida mover_stock contra ella.
+  SELECT empresa_id INTO v_emp FROM core.productos
+   WHERE id = (p_payload->>'producto_id')::uuid AND deleted_at IS NULL
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id);
+  IF v_emp IS NULL THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('NOT_FOUND','Producto no encontrado','producto_id'));
+  END IF;
+
+  -- Las referencias opcionales también tienen que ser de la clínica: el kardex
+  -- de una no puede apuntar al paciente o al proveedor de otra.
+  IF (NULLIF(p_payload->>'cliente_id','') IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM core.clientes WHERE id = (p_payload->>'cliente_id')::uuid AND empresa_id = v_emp))
+     OR (NULLIF(p_payload->>'mascota_id','') IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM core.mascotas WHERE id = (p_payload->>'mascota_id')::uuid AND empresa_id = v_emp))
+     OR (NULLIF(p_payload->>'proveedor_id','') IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM core.proveedores WHERE id = (p_payload->>'proveedor_id')::uuid AND empresa_id = v_emp)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Referencia no encontrada'));
+  END IF;
+
+  IF (p_payload->>'tipo') = 'transferencia' AND NULLIF(p_payload->>'almacen_destino_id','') IS NULL THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('VALIDATION_ERROR',
+        'Una transferencia necesita el almacén de destino','almacen_destino_id'));
   END IF;
 
   v_id := internal.mover_stock(

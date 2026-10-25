@@ -21,7 +21,10 @@
             <FileText :size="14" /> Receta
           </button>
           <button v-if="editable" class="btn" :disabled="guardando" @click="guardar">
-            <Save :size="14" /> {{ guardando ? "Guardando…" : "Guardar" }}
+            <Save :size="14" /> {{ guardando ? "Guardando…" : sucio ? "Guardar •" : "Guardar" }}
+          </button>
+          <button v-if="puedeCobrar" class="btn" @click="abrirCobro">
+            <Wallet :size="14" /> Cobrar
           </button>
           <button v-if="editable" class="btn primary" :disabled="cerrando" @click="cerrar">
             <CheckCircle2 :size="14" /> {{ cerrando ? "Cerrando…" : "Cerrar consulta" }}
@@ -34,6 +37,10 @@
       </div>
       <div v-if="mensaje" class="callout" style="margin-bottom: 14px">
         <CheckCircle2 :size="15" /> <span>{{ mensaje }}</span>
+      </div>
+      <div v-if="editable && sucio" class="callout warn" style="margin-bottom: 14px" role="status">
+        <AlertTriangle :size="15" />
+        <span>Hay cambios sin guardar. Se conserva un borrador en este equipo por si se cierra la pestaña.</span>
       </div>
 
       <div v-if="c.alergias || c.condiciones_cronicas" class="alerta-clinica" style="margin-bottom: 16px">
@@ -63,12 +70,12 @@
             </header>
             <div class="module-panel-body">
               <div class="field">
-                <label>Motivo de la consulta</label>
-                <textarea v-model="f.motivo" rows="2" :disabled="!editable"></textarea>
+                <label for="consultade-motivo">Motivo de la consulta</label>
+                <textarea id="consultade-motivo" v-model="f.motivo" rows="2" :disabled="!editable"></textarea>
               </div>
               <div class="field">
-                <label>Anamnesis</label>
-                <textarea
+                <label for="consultade-anamnesis">Anamnesis</label>
+                <textarea id="consultade-anamnesis"
                   v-model="f.anamnesis"
                   rows="3"
                   :disabled="!editable"
@@ -86,38 +93,38 @@
             <div class="module-panel-body">
               <div class="constantes">
                 <div class="field">
-                  <label>Peso (kg)</label>
-                  <input v-model.number="f.peso_kg" type="number" step="0.1" min="0" :disabled="!editable" />
+                  <label for="consultade-peso-kg">Peso (kg)</label>
+                  <input id="consultade-peso-kg" v-model.number="f.peso_kg" type="number" step="0.1" min="0" :disabled="!editable" />
                 </div>
                 <div class="field">
-                  <label>Temperatura (°C)</label>
-                  <input v-model.number="f.temperatura_c" type="number" step="0.1" min="25" max="45" :disabled="!editable" />
+                  <label for="consultade-temperatura-c">Temperatura (°C)</label>
+                  <input id="consultade-temperatura-c" v-model.number="f.temperatura_c" type="number" step="0.1" min="25" max="45" :disabled="!editable" />
                   <small v-if="tempAlerta" class="alerta-txt">{{ tempAlerta }}</small>
                 </div>
                 <div class="field">
-                  <label>FC (lpm)</label>
-                  <input v-model.number="f.frecuencia_cardiaca" type="number" min="0" :disabled="!editable" />
+                  <label for="consultade-frecuencia-cardiaca">FC (lpm)</label>
+                  <input id="consultade-frecuencia-cardiaca" v-model.number="f.frecuencia_cardiaca" type="number" min="0" :disabled="!editable" />
                 </div>
                 <div class="field">
-                  <label>FR (rpm)</label>
-                  <input v-model.number="f.frecuencia_respiratoria" type="number" min="0" :disabled="!editable" />
+                  <label for="consultade-frecuencia-respiratoria">FR (rpm)</label>
+                  <input id="consultade-frecuencia-respiratoria" v-model.number="f.frecuencia_respiratoria" type="number" min="0" :disabled="!editable" />
                 </div>
                 <div class="field">
-                  <label>Mucosas</label>
-                  <input v-model.trim="f.mucosas" type="text" placeholder="rosadas" :disabled="!editable" />
+                  <label for="consultade-mucosas">Mucosas</label>
+                  <input id="consultade-mucosas" v-model.trim="f.mucosas" type="text" placeholder="rosadas" :disabled="!editable" />
                 </div>
                 <div class="field">
-                  <label>TLLC (s)</label>
-                  <input v-model.number="f.tllc_seg" type="number" step="0.1" min="0" :disabled="!editable" />
+                  <label for="consultade-tllc-seg">TLLC (s)</label>
+                  <input id="consultade-tllc-seg" v-model.number="f.tllc_seg" type="number" step="0.1" min="0" :disabled="!editable" />
                 </div>
                 <div class="field">
-                  <label>Condición corporal (1-9)</label>
-                  <input v-model.number="f.condicion_corporal" type="number" min="1" max="9" :disabled="!editable" />
+                  <label for="consultade-condicion-corporal">Condición corporal (1-9)</label>
+                  <input id="consultade-condicion-corporal" v-model.number="f.condicion_corporal" type="number" min="1" max="9" :disabled="!editable" />
                 </div>
               </div>
               <div class="field" style="margin-top: 12px">
-                <label>Examen físico</label>
-                <textarea v-model="f.examen_fisico" rows="3" :disabled="!editable"></textarea>
+                <label for="consultade-examen-fisico">Examen físico</label>
+                <textarea id="consultade-examen-fisico" v-model="f.examen_fisico" rows="3" :disabled="!editable"></textarea>
               </div>
             </div>
           </section>
@@ -129,18 +136,18 @@
             </header>
             <div class="module-panel-body">
               <div class="field">
-                <label>Diagnóstico <span class="req">*</span></label>
-                <textarea v-model="f.diagnostico" rows="2" :disabled="!editable"></textarea>
+                <label for="consultade-diagnostico">Diagnóstico <span class="req">*</span></label>
+                <textarea id="consultade-diagnostico" v-model="f.diagnostico" rows="2" :disabled="!editable"></textarea>
                 <small class="muted">Obligatorio para poder cerrar la consulta.</small>
               </div>
               <div class="field">
-                <label>Diagnóstico diferencial</label>
-                <textarea v-model="f.diagnostico_diferencial" rows="2" :disabled="!editable"></textarea>
+                <label for="consultade-diagnostico-diferencial">Diagnóstico diferencial</label>
+                <textarea id="consultade-diagnostico-diferencial" v-model="f.diagnostico_diferencial" rows="2" :disabled="!editable"></textarea>
               </div>
               <div class="form-grid">
                 <div class="field">
-                  <label>Pronóstico</label>
-                  <select v-model="f.pronostico" :disabled="!editable">
+                  <label for="consultade-pronostico">Pronóstico</label>
+                  <select id="consultade-pronostico" v-model="f.pronostico" :disabled="!editable">
                     <option value="">Sin definir</option>
                     <option value="favorable">Favorable</option>
                     <option value="reservado">Reservado</option>
@@ -148,22 +155,22 @@
                   </select>
                 </div>
                 <div class="field">
-                  <label>Próxima visita</label>
-                  <input v-model="f.proxima_visita" type="date" :disabled="!editable" />
+                  <label for="consultade-proxima-visita">Próxima visita</label>
+                  <input id="consultade-proxima-visita" v-model="f.proxima_visita" type="date" :disabled="!editable" />
                   <small class="muted">Genera un recordatorio de control.</small>
                 </div>
               </div>
               <div class="field">
-                <label>Plan terapéutico</label>
-                <textarea v-model="f.plan_terapeutico" rows="3" :disabled="!editable"></textarea>
+                <label for="consultade-plan-terapeutico">Plan terapéutico</label>
+                <textarea id="consultade-plan-terapeutico" v-model="f.plan_terapeutico" rows="3" :disabled="!editable"></textarea>
               </div>
               <div class="field">
-                <label>Prescripción</label>
-                <textarea v-model="f.prescripcion" rows="3" :disabled="!editable"></textarea>
+                <label for="consultade-prescripcion">Prescripción</label>
+                <textarea id="consultade-prescripcion" v-model="f.prescripcion" rows="3" :disabled="!editable"></textarea>
               </div>
               <div class="field">
-                <label>Indicaciones para casa</label>
-                <textarea v-model="f.indicaciones_casa" rows="2" :disabled="!editable"></textarea>
+                <label for="consultade-indicaciones-casa">Indicaciones para casa</label>
+                <textarea id="consultade-indicaciones-casa" v-model="f.indicaciones_casa" rows="2" :disabled="!editable"></textarea>
               </div>
             </div>
           </section>
@@ -191,8 +198,8 @@
                 <tbody>
                   <tr v-for="s in c.servicios" :key="s.id">
                     <td>{{ s.servicio }}</td>
-                    <td class="num mono">{{ s.cantidad }}</td>
-                    <td class="num mono">{{ fmtSoles(s.total) }}</td>
+                    <td class="num cifra">{{ s.cantidad }}</td>
+                    <td class="num cifra">{{ fmtSoles(s.total) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -220,8 +227,8 @@
                 <tbody>
                   <tr v-for="i in c.insumos" :key="i.id">
                     <td>{{ i.producto }}</td>
-                    <td class="num mono">{{ i.cantidad }}</td>
-                    <td class="num mono">{{ fmtSoles(i.precio_unitario) }}</td>
+                    <td class="num cifra">{{ i.cantidad }}</td>
+                    <td class="num cifra">{{ fmtSoles(i.precio_unitario) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -285,6 +292,16 @@
       </div>
 
       <!-- ---------- Modales ---------- -->
+      <CobroRapido
+        v-if="modalCobro"
+        :cliente="{ id: c.cliente_id, nombre_completo: c.cliente }"
+        :mascota="c.mascota"
+        :mascota-id="c.mascota_id"
+        :consulta-id="c.id"
+        :cita-id="c.cita_id || ''"
+        @close="modalCobro = false"
+        @listo="modalCobro = false"
+      />
       <VacunaModal
         v-if="modalVacuna"
         :mascota-id="c.mascota_id"
@@ -293,13 +310,13 @@
         @guardado="onSub"
       />
 
-      <div v-if="modalServicio" class="modal-back" @click="modalServicio = false">
+      <div v-if="modalServicio" class="modal-back" v-dialogo="() => (modalServicio = false)">
         <div class="modal" @click.stop>
           <div class="m-head"><h3>Agregar servicio</h3></div>
           <div class="m-body">
             <div class="field">
-              <label>Servicio</label>
-              <select v-model="sub.servicio_id">
+              <label for="consultade-servicio-id">Servicio</label>
+              <select id="consultade-servicio-id" v-model="sub.servicio_id">
                 <option value="">Seleccionar…</option>
                 <option v-for="s in servicios" :key="s.id" :value="s.id">
                   {{ s.nombre }} — {{ fmtSoles(s.precio) }}
@@ -307,8 +324,8 @@
               </select>
             </div>
             <div class="field">
-              <label>Cantidad</label>
-              <input v-model.number="sub.cantidad" type="number" min="1" step="1" />
+              <label for="consultade-cantidad">Cantidad</label>
+              <input id="consultade-cantidad" v-model.number="sub.cantidad" type="number" min="1" step="1" />
             </div>
           </div>
           <div class="m-foot modal-actions">
@@ -318,7 +335,7 @@
         </div>
       </div>
 
-      <div v-if="modalInsumo" class="modal-back" @click="modalInsumo = false">
+      <div v-if="modalInsumo" class="modal-back" v-dialogo="() => (modalInsumo = false)">
         <div class="modal" @click.stop>
           <div class="m-head"><h3>Consumir insumo</h3></div>
           <div class="m-body">
@@ -326,8 +343,8 @@
               El consumo descuenta stock del almacén y queda pendiente de facturar.
             </p>
             <div class="field">
-              <label>Producto</label>
-              <select v-model="sub.producto_id">
+              <label for="consultade-producto-id">Producto</label>
+              <select id="consultade-producto-id" v-model="sub.producto_id">
                 <option value="">Seleccionar…</option>
                 <option v-for="p in productos" :key="p.id" :value="p.id">
                   {{ p.nombre }} ({{ p.stock_actual }} {{ p.unidad_medida }})
@@ -335,8 +352,8 @@
               </select>
             </div>
             <div class="field">
-              <label>Cantidad</label>
-              <input v-model.number="sub.cantidadInsumo" type="number" min="0.01" step="0.01" />
+              <label for="consultade-cantidadinsumo">Cantidad</label>
+              <input id="consultade-cantidadinsumo" v-model.number="sub.cantidadInsumo" type="number" min="0.01" step="0.01" />
             </div>
           </div>
           <div class="m-foot modal-actions">
@@ -346,22 +363,22 @@
         </div>
       </div>
 
-      <div v-if="modalTratamiento" class="modal-back" @click="modalTratamiento = false">
+      <div v-if="modalTratamiento" class="modal-back" v-dialogo="() => (modalTratamiento = false)">
         <div class="modal modal-wide" @click.stop>
           <div class="m-head"><h3>Indicar tratamiento</h3></div>
           <div class="m-body">
             <div class="form-grid">
               <div class="field" style="grid-column: 1 / -1">
-                <label>Medicamento <span class="req">*</span></label>
-                <input v-model.trim="trat.medicamento" type="text" placeholder="Amoxicilina 500 mg" />
+                <label for="consultade-medicamento">Medicamento <span class="req">*</span></label>
+                <input id="consultade-medicamento" v-model.trim="trat.medicamento" type="text" placeholder="Amoxicilina 500 mg" />
               </div>
               <div class="field">
-                <label>Dosis <span class="req">*</span></label>
-                <input v-model.trim="trat.dosis" type="text" placeholder="1/2 tableta" />
+                <label for="consultade-dosis">Dosis <span class="req">*</span></label>
+                <input id="consultade-dosis" v-model.trim="trat.dosis" type="text" placeholder="1/2 tableta" />
               </div>
               <div class="field">
-                <label>Vía</label>
-                <select v-model="trat.via">
+                <label for="consultade-via">Vía</label>
+                <select id="consultade-via" v-model="trat.via">
                   <option value="oral">Oral</option>
                   <option value="subcutanea">Subcutánea</option>
                   <option value="intramuscular">Intramuscular</option>
@@ -372,16 +389,16 @@
                 </select>
               </div>
               <div class="field">
-                <label>Cada (horas)</label>
-                <input v-model.number="trat.frecuencia_horas" type="number" min="1" />
+                <label for="consultade-frecuencia-horas">Cada (horas)</label>
+                <input id="consultade-frecuencia-horas" v-model.number="trat.frecuencia_horas" type="number" min="1" />
               </div>
               <div class="field">
-                <label>Duración (días)</label>
-                <input v-model.number="trat.duracion_dias" type="number" min="1" />
+                <label for="consultade-duracion-dias">Duración (días)</label>
+                <input id="consultade-duracion-dias" v-model.number="trat.duracion_dias" type="number" min="1" />
               </div>
               <div class="field" style="grid-column: 1 / -1">
-                <label>Indicaciones</label>
-                <textarea v-model="trat.indicaciones" rows="2"></textarea>
+                <label for="consultade-indicaciones">Indicaciones</label>
+                <textarea id="consultade-indicaciones" v-model="trat.indicaciones" rows="2"></textarea>
               </div>
             </div>
           </div>
@@ -394,13 +411,13 @@
         </div>
       </div>
 
-      <div v-if="modalExamen" class="modal-back" @click="modalExamen = false">
+      <div v-if="modalExamen" class="modal-back" v-dialogo="() => (modalExamen = false)">
         <div class="modal" @click.stop>
           <div class="m-head"><h3>Registrar examen</h3></div>
           <div class="m-body">
             <div class="field">
-              <label>Tipo <span class="req">*</span></label>
-              <select v-model="exam.tipo">
+              <label for="consultade-tipo">Tipo <span class="req">*</span></label>
+              <select id="consultade-tipo" v-model="exam.tipo">
                 <option value="hemograma">Hemograma</option>
                 <option value="bioquimica">Bioquímica</option>
                 <option value="urianalisis">Urianálisis</option>
@@ -411,16 +428,16 @@
               </select>
             </div>
             <div class="field">
-              <label>Nombre <span class="req">*</span></label>
-              <input v-model.trim="exam.nombre" type="text" placeholder="Hemograma completo" />
+              <label for="consultade-nombre">Nombre <span class="req">*</span></label>
+              <input id="consultade-nombre" v-model.trim="exam.nombre" type="text" placeholder="Hemograma completo" />
             </div>
             <div class="field">
-              <label>Resultado</label>
-              <textarea v-model="exam.resultado" rows="3"></textarea>
+              <label for="consultade-resultado">Resultado</label>
+              <textarea id="consultade-resultado" v-model="exam.resultado" rows="3"></textarea>
             </div>
             <div class="field">
-              <label>Interpretación</label>
-              <textarea v-model="exam.interpretacion" rows="2"></textarea>
+              <label for="consultade-interpretacion">Interpretación</label>
+              <textarea id="consultade-interpretacion" v-model="exam.interpretacion" rows="2"></textarea>
             </div>
           </div>
           <div class="m-foot modal-actions">
@@ -434,15 +451,18 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from "vue";
-import { useRoute } from "vue-router";
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from "vue";
+import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import {
   Loader2, ArrowLeft, Save, CheckCircle2, AlertCircle, AlertTriangle, Lock,
   MessageSquare, Activity, ClipboardCheck, Receipt, Package, Pill, Syringe,
-  FlaskConical, Plus, PawPrint, FileText,
+  FlaskConical, Plus, PawPrint, FileText, Wallet,
 } from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import VacunaModal from "../components/VacunaModal.vue";
+import CobroRapido from "../../facturacion/components/CobroRapido.vue";
+import { useAuth } from "../../../shared/composables/useAuth.js";
+import { notify } from "../../../shared/composables/useNotify.js";
 import { clinicoApi } from "../api/clinico.api.js";
 import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { inventarioApi } from "../../inventario/api/inventario.api.js";
@@ -464,6 +484,10 @@ const modalServicio = ref(false);
 const modalInsumo = ref(false);
 const modalTratamiento = ref(false);
 const modalExamen = ref(false);
+const modalCobro = ref(false);
+
+const { hasPermission } = useAuth();
+const puedeCobrar = computed(() => hasPermission("facturacion:emitir"));
 
 const sub = reactive({ servicio_id: "", cantidad: 1, producto_id: "", cantidadInsumo: 1 });
 const trat = reactive({ medicamento: "", dosis: "", via: "oral", frecuencia_horas: null, duracion_dias: null, indicaciones: "" });
@@ -488,19 +512,76 @@ const tempAlerta = computed(() => {
   return "";
 });
 
-function hidratar(data) {
+// Campos que el SP sólo actualiza si llega un valor (COALESCE/NULLIF): se
+// pueden corregir pero no dejar vacíos. Los de texto sí se vacían con "".
+const NO_BORRABLES = new Set([
+  "peso_kg", "temperatura_c", "frecuencia_cardiaca", "frecuencia_respiratoria",
+  "tllc_seg", "condicion_corporal", "proxima_visita",
+]);
+
+/** Foto de lo que hay en el servidor: contra esto se mide "sin guardar". */
+const original = ref("");
+const snapshot = () => JSON.stringify(f);
+const sucio = computed(() => !!c.value && original.value !== "" && snapshot() !== original.value);
+
+const claveBorrador = () => `vet_borrador_consulta_${route.params.id}`;
+function leerBorrador() {
+  try {
+    const raw = localStorage.getItem(claveBorrador());
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function borrarBorrador() {
+  try { localStorage.removeItem(claveBorrador()); } catch { /* sin storage */ }
+}
+let timerBorrador = null;
+watch(f, () => {
+  clearTimeout(timerBorrador);
+  timerBorrador = setTimeout(() => {
+    if (!editable.value) return;
+    try {
+      if (sucio.value) localStorage.setItem(claveBorrador(), JSON.stringify({ at: Date.now(), f: { ...f } }));
+      else localStorage.removeItem(claveBorrador());
+    } catch { /* storage lleno o bloqueado: el guard de salida sigue protegiendo */ }
+  }, 800);
+}, { deep: true });
+
+function hidratar(data, { conservarFormulario = false } = {}) {
   c.value = data;
+  // Recargar tras agregar un servicio o un insumo no debe borrar lo que el
+  // veterinario está escribiendo en el SOAP.
+  if (conservarFormulario && sucio.value) return;
   for (const k of Object.keys(f)) {
     f[k] = data[k] ?? (typeof f[k] === "number" ? null : "");
   }
   if (data.proxima_visita) f.proxima_visita = String(data.proxima_visita).slice(0, 10);
+  original.value = snapshot();
 }
 
-async function cargar() {
-  cargando.value = true;
+async function ofrecerBorrador() {
+  if (!editable.value) { borrarBorrador(); return; }
+  const b = leerBorrador();
+  if (!b?.f) return;
+  const distinto = Object.keys(f).some((k) => (b.f[k] ?? "") !== (f[k] ?? ""));
+  if (!distinto) { borrarBorrador(); return; }
+  const hora = new Date(b.at).toLocaleString("es-PE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const ok = await notify.confirm(
+    "Hay un borrador sin guardar",
+    `Quedaron cambios de esta consulta sin guardar (${hora}). ¿Quieres recuperarlos?`,
+    { confirmText: "Recuperar borrador", cancelText: "Descartar" },
+  );
+  if (ok) {
+    for (const k of Object.keys(f)) if (k in b.f) f[k] = b.f[k];
+  } else {
+    borrarBorrador();
+  }
+}
+
+async function cargar(opts = {}) {
+  if (!opts.conservarFormulario) cargando.value = true;
   try {
     const r = await clinicoApi.consulta(route.params.id);
-    hidratar(r.data);
+    hidratar(r.data, opts);
   } catch (e) {
     error.value = e.message;
   } finally {
@@ -508,13 +589,26 @@ async function cargar() {
   }
 }
 
+/** Solo viaja lo que cambió; un texto borrado viaja como "" para vaciarlo. */
 function payload() {
+  const antes = original.value ? JSON.parse(original.value) : {};
   const p = {};
   for (const [k, v] of Object.entries(f)) {
-    if (v === "" || v === null || v === undefined) continue;
-    p[k] = v;
+    if (JSON.stringify(v) === JSON.stringify(antes[k])) continue;
+    const vacio = v === "" || v === null || v === undefined;
+    if (vacio && NO_BORRABLES.has(k)) continue; // el SP lo ignoraría igual
+    p[k] = vacio ? "" : v;
   }
   return p;
+}
+
+/** Números o fechas que se vaciaron: el servidor conserva el valor anterior. */
+function camposNoBorrados() {
+  const antes = original.value ? JSON.parse(original.value) : {};
+  return [...NO_BORRABLES].filter((k) => {
+    const v = f[k];
+    return (v === "" || v === null) && antes[k] !== "" && antes[k] !== null && antes[k] !== undefined;
+  });
 }
 
 async function guardar() {
@@ -522,9 +616,14 @@ async function guardar() {
   mensaje.value = "";
   guardando.value = true;
   try {
-    await clinicoApi.actualizarConsulta(route.params.id, payload());
-    mensaje.value = "Consulta guardada.";
+    const p = payload();
+    if (Object.keys(p).length) await clinicoApi.actualizarConsulta(route.params.id, p);
+    const noBorrados = camposNoBorrados();
+    borrarBorrador();
     await cargar();
+    mensaje.value = noBorrados.length
+      ? "Consulta guardada. Las constantes y fechas no se pueden dejar vacías: se conservó el valor anterior."
+      : "Consulta guardada.";
   } catch (e) {
     error.value = e.message;
   } finally {
@@ -541,10 +640,20 @@ async function cerrar() {
   cerrando.value = true;
   try {
     // Se guarda primero: cerrar congela el documento clínico.
-    await clinicoApi.actualizarConsulta(route.params.id, payload());
+    const p = payload();
+    if (Object.keys(p).length) await clinicoApi.actualizarConsulta(route.params.id, p);
     await clinicoApi.cerrarConsulta(route.params.id);
+    borrarBorrador();
     mensaje.value = "Consulta cerrada y cita completada.";
     await cargar();
+    // Atención terminada: lo natural es pasar a caja sin salir de la ficha.
+    if (puedeCobrar.value && await notify.confirm(
+      "Consulta cerrada",
+      "¿Emitir el comprobante y cobrar ahora?",
+      { confirmText: "Cobrar ahora", cancelText: "Más tarde", icon: "success" },
+    )) {
+      modalCobro.value = true;
+    }
   } catch (e) {
     error.value = e.message;
   } finally {
@@ -554,7 +663,21 @@ async function cerrar() {
 
 async function onSub() {
   modalVacuna.value = false;
-  await cargar();
+  await cargar({ conservarFormulario: true });
+}
+
+async function abrirCobro() {
+  if (editable.value && sucio.value) {
+    const ok = await notify.confirm(
+      "Cambios sin guardar",
+      "Guarda la consulta antes de cobrar para no perder lo escrito.",
+      { confirmText: "Guardar y cobrar" },
+    );
+    if (!ok) return;
+    await guardar();
+    if (error.value) return;
+  }
+  modalCobro.value = true;
 }
 
 async function agregarServicio() {
@@ -568,10 +691,10 @@ async function agregarServicio() {
     modalServicio.value = false;
     sub.servicio_id = "";
     sub.cantidad = 1;
-    await cargar();
+    await cargar({ conservarFormulario: true });
   } catch (e) {
-    error.value = e.message;
-    modalServicio.value = false;
+    // El modal queda abierto: lo cargado no se pierde y se puede reintentar.
+    notify.error("No se pudo registrar", e.message);
   }
 }
 
@@ -586,10 +709,10 @@ async function consumirInsumo() {
     modalInsumo.value = false;
     sub.producto_id = "";
     sub.cantidadInsumo = 1;
-    await Promise.all([cargar(), cargarProductos()]);
+    await Promise.all([cargar({ conservarFormulario: true }), cargarProductos()]);
   } catch (e) {
-    error.value = e.message;
-    modalInsumo.value = false;
+    // El modal queda abierto: lo cargado no se pierde y se puede reintentar.
+    notify.error("No se pudo registrar", e.message);
   }
 }
 
@@ -607,10 +730,10 @@ async function agregarTratamiento() {
     });
     modalTratamiento.value = false;
     Object.assign(trat, { medicamento: "", dosis: "", via: "oral", frecuencia_horas: null, duracion_dias: null, indicaciones: "" });
-    await cargar();
+    await cargar({ conservarFormulario: true });
   } catch (e) {
-    error.value = e.message;
-    modalTratamiento.value = false;
+    // El modal queda abierto: lo cargado no se pierde y se puede reintentar.
+    notify.error("No se pudo registrar", e.message);
   }
 }
 
@@ -626,10 +749,10 @@ async function agregarExamen() {
     });
     modalExamen.value = false;
     Object.assign(exam, { tipo: "hemograma", nombre: "", resultado: "", interpretacion: "" });
-    await cargar();
+    await cargar({ conservarFormulario: true });
   } catch (e) {
-    error.value = e.message;
-    modalExamen.value = false;
+    // El modal queda abierto: lo cargado no se pierde y se puede reintentar.
+    notify.error("No se pudo registrar", e.message);
   }
 }
 
@@ -638,8 +761,33 @@ async function cargarProductos() {
   productos.value = p.data ?? [];
 }
 
+/** Salir con cambios sin guardar pide confirmación (el borrador se conserva). */
+async function confirmarSalida() {
+  if (!editable.value || !sucio.value) return true;
+  return notify.confirm(
+    "¿Salir sin guardar?",
+    "La consulta tiene cambios sin guardar. Quedará un borrador en este equipo para recuperarlo al volver.",
+    { confirmText: "Salir", cancelText: "Seguir editando", icon: "warning" },
+  );
+}
+onBeforeRouteLeave(confirmarSalida);
+onBeforeRouteUpdate(confirmarSalida);
+
+function onBeforeUnload(e) {
+  if (editable.value && sucio.value) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+}
+window.addEventListener("beforeunload", onBeforeUnload);
+onBeforeUnmount(() => {
+  window.removeEventListener("beforeunload", onBeforeUnload);
+  clearTimeout(timerBorrador);
+});
+
 onMounted(async () => {
   await cargar();
+  await ofrecerBorrador();
   try {
     const [s] = await Promise.all([catalogosApi.servicios({ estado: "activo" }), cargarProductos()]);
     servicios.value = s.data ?? [];
@@ -648,7 +796,12 @@ onMounted(async () => {
   }
 });
 
-watch(() => route.params.id, cargar);
+watch(() => route.params.id, async (id) => {
+  if (!id) return;
+  original.value = "";
+  await cargar();
+  await ofrecerBorrador();
+});
 </script>
 
 <style scoped>

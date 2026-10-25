@@ -23,4 +23,6 @@ export class RegistrarPagoDto {
   /** Omitir para imputar a los comprobantes más antiguos. */
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AplicacionDto)
   aplicaciones?: AplicacionDto[];
+  /** Generada por el cliente: un doble clic o un reintento no cobra dos veces. */
+  @IsOptional() @IsUUID() idempotency_key?: string;
 }

@@ -23,7 +23,7 @@
         </thead>
         <tbody>
           <tr v-for="(f, i) in filas" :key="i">
-            <td v-for="col in columnas" :key="col.k" :class="[col.num ? 'num mono' : '']">
+            <td v-for="col in columnas" :key="col.k" :class="[col.num ? 'num cifra' : '']">
               {{ formatear(f[col.k], col) }}
             </td>
           </tr>

@@ -18,7 +18,10 @@ ChartJS.register(
 );
 
 ChartJS.defaults.font.family =
-  "'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  "'IBM Plex Sans', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 ChartJS.defaults.font.size = 11.5;
-ChartJS.defaults.color = "#6B7472";
-ChartJS.defaults.borderColor = "#E7EAE8";
+ChartJS.defaults.color = "#6A7F76";
+ChartJS.defaults.borderColor = "#E5EBE6";
+
+// Series de la paleta: la 1 es el dato principal, la 2 la comparación.
+export const SERIES = ["#178A72", "#5FC4AA"];

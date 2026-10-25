@@ -3,12 +3,9 @@ import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import { AuthRepository, LoginData } from "./auth.repository";
-import { RedisService } from "../../infrastructure/cache/redis.service";
+import { SesionesService, duracionEnSegundos } from "../../infrastructure/cache/sesiones.service";
 import { JwtPayload } from "../../common/types/jwt-payload.type";
 import { SpContext } from "../../common/types/sp-result.type";
-
-/** Prefijo de la whitelist de refresh tokens en Redis. */
-const REFRESH_KEY = (jti: string) => `refresh:${jti}`;
 
 @Injectable()
 export class AuthService {
@@ -16,8 +13,12 @@ export class AuthService {
     private readonly repo: AuthRepository,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-    private readonly redis: RedisService,
+    private readonly sesiones: SesionesService,
   ) {}
+
+  // Sin JWT_ISSUER/JWT_AUDIENCE en el entorno, jsonwebtoken rechaza firmar
+  // ("issuer must be a string") y el login entero respondía 500: el compose
+  // de producción no las definía. Van con el mismo default que jwt.config.ts.
 
   private ctx(u: JwtPayload): SpContext {
     return { userId: u.sub, empresaId: u.empresa_id, isSuperAdmin: u.is_super_admin };
@@ -47,21 +48,24 @@ export class AuthService {
     const access_token = await this.jwt.signAsync(payload, {
       secret: this.config.get<string>("JWT_ACCESS_SECRET"),
       expiresIn: this.config.get<string>("JWT_ACCESS_EXPIRES") ?? "15m",
-      issuer: this.config.get<string>("JWT_ISSUER"),
-      audience: this.config.get<string>("JWT_AUDIENCE"),
+      issuer: this.config.get<string>("JWT_ISSUER") ?? "veterp",
+      audience: this.config.get<string>("JWT_AUDIENCE") ?? "veterp-backoffice",
     });
 
+    const refreshExpires = this.config.get<string>("JWT_REFRESH_EXPIRES") ?? "7d";
     const refresh_token = await this.jwt.signAsync(
       { sub: data.user.id, jti },
       {
         secret: this.config.get<string>("JWT_REFRESH_SECRET"),
-        expiresIn: this.config.get<string>("JWT_REFRESH_EXPIRES") ?? "7d",
-        issuer: this.config.get<string>("JWT_ISSUER"),
-        audience: this.config.get<string>("JWT_AUDIENCE"),
+        expiresIn: refreshExpires,
+        issuer: this.config.get<string>("JWT_ISSUER") ?? "veterp",
+        audience: this.config.get<string>("JWT_AUDIENCE") ?? "veterp-backoffice",
       },
     );
 
-    await this.redis.set(REFRESH_KEY(jti), data.user.id, 7 * 24 * 3600);
+    // La entrada de Redis vence con el token: ni antes (cerraría sesiones
+    // válidas) ni después (guardaría sesiones que ya nadie puede usar).
+    await this.sesiones.registrar(jti, data.user.id, duracionEnSegundos(refreshExpires));
 
     return { access_token, refresh_token, ...data };
   }
@@ -71,22 +75,22 @@ export class AuthService {
     try {
       decoded = await this.jwt.verifyAsync(refresh_token, {
         secret: this.config.get<string>("JWT_REFRESH_SECRET"),
-        issuer: this.config.get<string>("JWT_ISSUER"),
-        audience: this.config.get<string>("JWT_AUDIENCE"),
+        issuer: this.config.get<string>("JWT_ISSUER") ?? "veterp",
+        audience: this.config.get<string>("JWT_AUDIENCE") ?? "veterp-backoffice",
       });
     } catch {
       throw new UnauthorizedException("Sesión expirada, vuelve a iniciar sesión");
     }
 
-    // Si el jti no está en la whitelist, la sesión fue revocada.
-    const vigente = await this.redis.get(REFRESH_KEY(decoded.jti));
-    if (!vigente) {
+    // Rotación atómica: el refresh se consume (se lee y se borra) en una sola
+    // operación. Si no estaba —revocado, vencido o ya usado— no hay sesión.
+    const titular = decoded.jti ? await this.sesiones.consumir(decoded.jti) : null;
+    if (!titular || titular !== decoded.sub) {
       throw new UnauthorizedException("Sesión revocada, vuelve a iniciar sesión");
     }
 
-    // Rotación: el refresh usado se invalida al emitir el nuevo par.
-    await this.redis.del(REFRESH_KEY(decoded.jti));
-
+    // fn_auth_perfil rechaza a una cuenta que ya no está activa: la baja corta
+    // también la renovación, no solo el siguiente login.
     const data = await this.repo.perfil(decoded.sub);
     return this.emitirSesion(data);
   }
@@ -96,10 +100,10 @@ export class AuthService {
     try {
       const decoded = await this.jwt.verifyAsync<{ jti: string }>(refresh_token, {
         secret: this.config.get<string>("JWT_REFRESH_SECRET"),
-        issuer: this.config.get<string>("JWT_ISSUER"),
-        audience: this.config.get<string>("JWT_AUDIENCE"),
+        issuer: this.config.get<string>("JWT_ISSUER") ?? "veterp",
+        audience: this.config.get<string>("JWT_AUDIENCE") ?? "veterp-backoffice",
       });
-      await this.redis.del(REFRESH_KEY(decoded.jti));
+      await this.sesiones.revocar(decoded.jti);
     } catch {
       // Un token ya vencido o inválido no impide cerrar sesión.
     }
@@ -110,16 +114,31 @@ export class AuthService {
     return this.repo.perfil(userId);
   }
 
-  cambiarPassword(u: JwtPayload, actual: string, nueva: string) {
-    return this.repo.cambiarPassword(this.ctx(u), actual, nueva);
+  /**
+   * Cambiar la contraseña cierra todas las sesiones abiertas del usuario: si
+   * la cambió porque sospechaba que alguien más la tenía, esa otra sesión es
+   * justo la que hay que cortar. A quien la cambió se le entrega un par nuevo
+   * —ya sin `must_change_password`— para que no tenga que volver a entrar.
+   */
+  async cambiarPassword(u: JwtPayload, actual: string, nueva: string) {
+    await this.repo.cambiarPassword(this.ctx(u), actual, nueva);
+    await this.sesiones.revocarTodas(u.sub);
+    const sesion = await this.emitirSesion(await this.repo.perfil(u.sub));
+    return {
+      updated: true,
+      access_token: sesion.access_token,
+      refresh_token: sesion.refresh_token,
+    };
   }
 
   solicitarReset(email: string) {
     return this.repo.solicitarReset(email);
   }
 
-  resetPassword(token: string, nueva: string) {
-    return this.repo.resetPassword(token, nueva);
+  async resetPassword(token: string, nueva: string) {
+    const data = await this.repo.resetPassword(token, nueva);
+    if (data?.user_id) await this.sesiones.revocarTodas(data.user_id);
+    return { updated: true };
   }
 
   /**

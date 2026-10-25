@@ -5,7 +5,7 @@
     </div>
     <span
       v-if="showLabel"
-      :style="{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', color: 'var(--ink-2)', minWidth: '32px', textAlign: 'right' }"
+      :style="{ fontFamily: 'var(--font-display)', fontVariantNumeric: 'tabular-nums', fontSize: '11.5px', color: 'var(--ink-2)', minWidth: '32px', textAlign: 'right' }"
     >{{ clamped }}%</span>
   </div>
 </template>
@@ -15,7 +15,7 @@ import { computed } from "vue";
 
 const props = defineProps({
   value: { type: Number, default: 0 },
-  color: { type: String, default: "var(--green)" },
+  color: { type: String, default: "var(--serie-1)" },
   height: { type: Number, default: 6 },
   showLabel: { type: Boolean, default: false }
 });

@@ -272,6 +272,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   width: 320px;
+  max-width: 100%;
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -351,7 +352,7 @@ onBeforeUnmount(() => {
 }
 .cmdk-item.active { background: var(--emerald-soft, rgba(31, 201, 122, 0.12)); }
 .cmdk-item-icon { flex: 0 0 auto; color: var(--ink-3, #64748b); }
-.cmdk-item.active .cmdk-item-icon { color: var(--emerald, #1fc97a); }
+.cmdk-item.active .cmdk-item-icon { color: var(--emerald); }
 .cmdk-item-label {
   flex: 1;
   font-size: 13.5px;
@@ -398,4 +399,14 @@ onBeforeUnmount(() => {
 .cmdk-leave-active { transition: opacity 0.14s ease, transform 0.14s ease; transform-origin: top right; }
 .cmdk-enter-from,
 .cmdk-leave-to { opacity: 0; transform: translateY(-6px) scale(0.98); }
+</style>
+
+<style>
+/* En pantallas angostas el buscador se encoge para no empujar el topbar. */
+@media (max-width: 900px) { .cmdk-box { width: 220px; } }
+@media (max-width: 720px) {
+  .cmdk { flex: 1 1 auto; min-width: 0; }
+  .cmdk-box { width: 100%; min-width: 0; }
+  .cmdk-kbd { display: none; }
+}
 </style>

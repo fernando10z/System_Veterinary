@@ -2,11 +2,13 @@
   <div class="topbar">
     <button
       class="icon-btn sidebar-toggle"
-      :title="isCollapsed ? 'Expandir menú' : 'Contraer menú'"
-      :aria-label="isCollapsed ? 'Expandir menú' : 'Contraer menú'"
+      :title="isMobile ? 'Menú' : isCollapsed ? 'Expandir menú' : 'Contraer menú'"
+      :aria-label="isMobile ? (mobileOpen ? 'Cerrar menú' : 'Abrir menú') : isCollapsed ? 'Expandir menú' : 'Contraer menú'"
+      :aria-expanded="isMobile ? String(mobileOpen) : undefined"
       @click="toggleSidebar"
     >
-      <PanelLeftOpen v-if="isCollapsed" :size="16" />
+      <Menu v-if="isMobile" :size="18" />
+      <PanelLeftOpen v-else-if="isCollapsed" :size="16" />
       <PanelLeftClose v-else :size="16" />
     </button>
 
@@ -24,9 +26,10 @@
     <CommandPalette />
 
     <!-- Caja abierta: el cajero necesita verlo sin entrar al módulo -->
-    <router-link v-if="caja" to="/caja" class="caja-chip" title="Tienes una caja abierta">
+    <!-- Sin monto: mostrar el efectivo esperado arruinaría el arqueo a ciegas. -->
+    <router-link v-if="caja" to="/caja" class="caja-chip" title="Tienes una caja abierta" aria-label="Caja abierta">
       <Wallet :size="13" />
-      <span class="mono">{{ fmtSoles(caja.efectivo + Number(caja.monto_apertura || 0)) }}</span>
+      <span>Caja abierta</span>
     </router-link>
 
     <div ref="notiRoot" class="noti-wrap">
@@ -105,7 +108,7 @@ import { computed, ref, onMounted, onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Sun, Moon, ChevronRight, PanelLeftClose, PanelLeftOpen, LogOut,
-  Bell, Wallet, KeyRound,
+  Bell, Wallet, KeyRound, Menu,
 } from "lucide-vue-next";
 import CommandPalette from "../shared/components/ui/CommandPalette.vue";
 import { useAuth } from "../shared/composables/useAuth.js";
@@ -114,13 +117,13 @@ import { useSidebar } from "../shared/composables/useSidebar.js";
 import { NAV_SECTIONS } from "../shared/config/navigation.js";
 import { notificacionesApi } from "../modules/auditoria/api/auditoria.api.js";
 import { cajaApi } from "../modules/pagos/api/pagos.api.js";
-import { fmtSoles, fmtFechaHora } from "../shared/components/ui/format.js";
+import { fmtFechaHora } from "../shared/components/ui/format.js";
 
 const route = useRoute();
 const router = useRouter();
 const { user: userRef, logout, hasPermission } = useAuth();
 const { theme, toggle } = useTheme();
-const { isCollapsed, toggle: toggleSidebar } = useSidebar();
+const { isCollapsed, isMobile, mobileOpen, toggle: toggleSidebar } = useSidebar();
 
 const user = computed(() => userRef.value);
 const isDark = computed(() => theme.value === "dark");
@@ -232,13 +235,20 @@ onBeforeUnmount(() => {
 
 /* ---- chip de caja abierta ---- */
 .caja-chip {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
   padding: 5px 10px; border-radius: 999px;
   background: var(--emerald-soft); color: var(--emerald-ink);
   border: 1px solid var(--emerald-line);
   font-size: 12px; font-weight: 600; text-decoration: none;
 }
 .caja-chip:hover { background: var(--emerald-soft-2); }
+/* En celular: el topbar no alcanza para migas, buscador y chips. */
+@media (max-width: 720px) {
+  .crumbs { display: none; }
+  .spacer { display: none; }
+  .caja-chip span { display: none; }
+  .caja-chip { padding: 7px; }
+}
 
 /* ---- popovers ---- */
 .noti-wrap, .user-wrap { position: relative; display: inline-flex; }

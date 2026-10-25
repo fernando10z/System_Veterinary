@@ -28,7 +28,7 @@
           >
             <div class="grow">
               <strong>{{ r.nombre }}</strong>
-              <small class="mono muted">{{ r.codigo }}</small>
+              <small class="codigo muted">{{ r.codigo }}</small>
             </div>
             <div class="stack text-right">
               <span class="tag">{{ labelScope(r.scope) }}</span>
@@ -95,7 +95,7 @@
                 />
                 <span>
                   {{ p.descripcion || p.accion }}
-                  <small class="mono muted">{{ p.codigo }}</small>
+                  <small class="codigo muted">{{ p.codigo }}</small>
                 </span>
               </label>
             </div>
@@ -105,7 +105,7 @@
     </div>
 
     <!-- Nuevo rol -->
-    <div v-if="modalNuevo" class="modal-back" @click="modalNuevo = false">
+    <div v-if="modalNuevo" class="modal-back" v-dialogo="() => (modalNuevo = false)">
       <div class="modal" @click.stop>
         <div class="m-head"><h3>Nuevo rol</h3></div>
         <div class="m-body">
@@ -113,16 +113,16 @@
             <AlertCircle :size="15" /> <span>{{ error }}</span>
           </div>
           <div class="field">
-            <label>Nombre <span class="req">*</span></label>
-            <input v-model.trim="nuevo.nombre" type="text" placeholder="Auxiliar de clínica" />
+            <label for="rolespermi-nombre">Nombre <span class="req">*</span></label>
+            <input id="rolespermi-nombre" v-model.trim="nuevo.nombre" type="text" placeholder="Auxiliar de clínica" />
           </div>
           <div class="field">
-            <label>Código <span class="req">*</span></label>
-            <input v-model.trim="nuevo.codigo" type="text" placeholder="auxiliar_clinica" />
+            <label for="rolespermi-codigo">Código <span class="req">*</span></label>
+            <input id="rolespermi-codigo" v-model.trim="nuevo.codigo" type="text" placeholder="auxiliar_clinica" />
           </div>
           <div class="field">
-            <label>Alcance</label>
-            <select v-model="nuevo.scope">
+            <label for="rolespermi-scope">Alcance</label>
+            <select id="rolespermi-scope" v-model="nuevo.scope">
               <option value="empresa">Una empresa</option>
               <option value="global_restricted">Todas las empresas (solo lectura/operación)</option>
               <option value="global">Todas las empresas (super admin)</option>
@@ -132,8 +132,8 @@
             </small>
           </div>
           <div class="field">
-            <label>Descripción</label>
-            <textarea v-model="nuevo.descripcion" rows="2"></textarea>
+            <label for="rolespermi-descripcion">Descripción</label>
+            <textarea id="rolespermi-descripcion" v-model="nuevo.descripcion" rows="2"></textarea>
           </div>
         </div>
         <div class="m-foot modal-actions">
@@ -252,6 +252,8 @@ async function cargar() {
       const act = roles.value.find((x) => x.id === sel.value.id);
       if (act) seleccionar(act);
     }
+  } catch (e) {
+    notify.toast(`No se pudieron cargar los roles: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

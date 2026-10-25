@@ -104,10 +104,15 @@ BEGIN
      LIMIT 1));
 
   IF v_almacen IS NOT NULL THEN
-    INSERT INTO core.stock (empresa_id, producto_id, almacen_id, cantidad)
-    VALUES (NEW.empresa_id, NEW.producto_id, v_almacen, v_delta)
-    ON CONFLICT (producto_id, almacen_id)
-    DO UPDATE SET cantidad = core.stock.cantidad + v_delta, updated_at = now();
+    -- UPDATE primero y INSERT solo si no hay fila. Un INSERT … ON CONFLICT con
+    -- delta negativo choca con ck_stock_no_negativo antes de llegar al
+    -- conflicto: Postgres valida la fila propuesta, no la que resultaría.
+    UPDATE core.stock SET cantidad = cantidad + v_delta, updated_at = now()
+     WHERE producto_id = NEW.producto_id AND almacen_id = v_almacen;
+    IF NOT FOUND THEN
+      INSERT INTO core.stock (empresa_id, producto_id, almacen_id, cantidad)
+      VALUES (NEW.empresa_id, NEW.producto_id, v_almacen, v_delta);
+    END IF;
 
     -- El destino de una transferencia recibe la cantidad completa
     IF NEW.tipo = 'transferencia' AND NEW.almacen_destino_id IS NOT NULL THEN
@@ -248,19 +253,28 @@ AS $$
 DECLARE
   v_comprobante UUID := COALESCE(NEW.comprobante_id, OLD.comprobante_id);
 BEGIN
+  -- La cabecera es la suma de sus líneas y nada más. El descuento global ya
+  -- viene prorrateado en las líneas desde la emisión: restarlo aquí otra vez
+  -- dejaba total ≠ base + IGV, que es exactamente lo que SUNAT rechaza.
   UPDATE core.comprobantes c
      SET subtotal = COALESCE(t.subtotal, 0),
          igv      = COALESCE(t.igv, 0),
-         total    = COALESCE(t.total, 0) - c.descuento_global,
-         saldo_pendiente = (COALESCE(t.total, 0) - c.descuento_global) - COALESCE((
-           SELECT SUM(pa.monto_aplicado) FROM core.pago_aplicaciones pa
-            WHERE pa.comprobante_id = c.id), 0),
+         total    = COALESCE(t.total, 0),
          updated_at = now()
     FROM (
       SELECT SUM(subtotal) AS subtotal, SUM(igv) AS igv, SUM(total) AS total
         FROM core.comprobante_items WHERE comprobante_id = v_comprobante
     ) t
    WHERE c.id = v_comprobante;
+
+  -- El saldo tiene una sola fórmula, y vive en internal.
+  PERFORM internal.recalcular_saldo_comprobante(v_comprobante);
+
+  -- Una línea de nota de crédito cambia también la deuda del documento que
+  -- corrige.
+  PERFORM internal.recalcular_saldo_comprobante(c.documento_ref_id)
+     FROM core.comprobantes c
+    WHERE c.id = v_comprobante AND c.documento_ref_id IS NOT NULL;
 
   RETURN NULL;
 END;
@@ -313,3 +327,28 @@ END $$;
 
 -- `users` queda fuera a propósito: un usuario de alcance global no pertenece a
 -- ninguna sede, y el super admin no tiene empresa de la que sacarla.
+
+
+-- -----------------------------------------------------------------------------
+-- trg_orden_anulada_libera_plan
+--
+-- Si se anula la orden que consumió un beneficio del plan, el cupo vuelve.
+-- En un trigger y no en cada SP que anula (peluquería, clínico, facturación)
+-- porque ninguno de ellos tiene que acordarse: la orden anulada ya no cuenta.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION core.trg_orden_anulada_libera_plan()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  DELETE FROM core.suscripcion_consumos WHERE orden_servicio_id = NEW.id;
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tg_orden_anulada_libera_plan ON core.ordenes_servicio;
+CREATE TRIGGER tg_orden_anulada_libera_plan
+  AFTER UPDATE OF estado ON core.ordenes_servicio
+  FOR EACH ROW
+  WHEN (NEW.estado = 'anulado' AND OLD.estado IS DISTINCT FROM 'anulado')
+  EXECUTE FUNCTION core.trg_orden_anulada_libera_plan();

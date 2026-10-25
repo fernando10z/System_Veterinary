@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal modal-doc" @click.stop>
       <div v-if="cargando" class="m-body">
         <span class="loading-mini"><Loader2 :size="14" class="spin" /> Cargando…</span>
@@ -7,7 +7,7 @@
 
       <template v-else-if="c">
         <div class="m-head">
-          <h3>{{ capitalizar(c.tipo) }} <span class="mono">{{ c.numero_completo }}</span></h3>
+          <h3>{{ capitalizar(c.tipo) }} <span class="codigo">{{ c.numero_completo }}</span></h3>
         </div>
 
         <div class="m-body">
@@ -16,7 +16,7 @@
             <div>
               <div class="emisor">{{ c.emisor?.razon_social }}</div>
               <div class="muted">{{ c.emisor?.nombre_comercial }}</div>
-              <div class="muted mono">RUC {{ c.emisor?.ruc }}</div>
+              <div class="muted codigo">RUC {{ c.emisor?.ruc }}</div>
               <div class="muted">{{ c.emisor?.direccion }}</div>
             </div>
             <div class="text-right">
@@ -34,7 +34,7 @@
             <div style="flex: 1">
               <strong>{{ sunat.titulo }}</strong>
               <div class="muted">{{ sunat.detalle }}</div>
-              <div v-if="c.pse_request_id" class="muted mono" style="font-size: 11px">
+              <div v-if="c.pse_request_id" class="muted codigo" style="font-size: 11px">
                 {{ c.pse_request_id }}
               </div>
             </div>
@@ -44,7 +44,7 @@
             <FileMinus :size="15" />
             <span>
               Esta nota corrige el comprobante
-              <strong class="mono">{{ c.documento_ref.numero_completo }}</strong>.
+              <strong class="codigo">{{ c.documento_ref.numero_completo }}</strong>.
               <template v-if="c.motivo_nota"> Motivo: {{ c.motivo_nota }}.</template>
             </span>
           </div>
@@ -56,7 +56,7 @@
             </div>
             <div class="detalle-item">
               <div class="k">Documento</div>
-              <div class="v mono">{{ c.cliente?.tipo_documento }} {{ c.cliente?.numero_documento }}</div>
+              <div class="v codigo">{{ c.cliente?.tipo_documento }} {{ c.cliente?.numero_documento }}</div>
             </div>
             <div class="detalle-item">
               <div class="k">Paciente</div>
@@ -80,26 +80,26 @@
                 <tr v-for="i in c.items" :key="i.id">
                   <td>
                     <strong>{{ i.descripcion }}</strong>
-                    <br /><small class="muted mono">{{ i.codigo || "" }}</small>
+                    <br /><small class="muted codigo">{{ i.codigo || "" }}</small>
                   </td>
-                  <td class="num mono">{{ i.cantidad }}</td>
-                  <td class="num mono">{{ fmtSoles(i.precio_unitario) }}</td>
-                  <td class="num mono">{{ fmtSoles(i.igv) }}</td>
-                  <td class="num mono">{{ fmtSoles(i.total) }}</td>
+                  <td class="num cifra">{{ i.cantidad }}</td>
+                  <td class="num cifra">{{ fmtSoles(i.precio_unitario) }}</td>
+                  <td class="num cifra">{{ fmtSoles(i.igv) }}</td>
+                  <td class="num cifra">{{ fmtSoles(i.total) }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
           <div class="totales">
-            <div><span>Subtotal</span><span class="mono">{{ fmtSoles(c.subtotal) }}</span></div>
-            <div><span>IGV</span><span class="mono">{{ fmtSoles(c.igv) }}</span></div>
+            <div><span>Subtotal</span><span class="cifra">{{ fmtSoles(c.subtotal) }}</span></div>
+            <div><span>IGV</span><span class="cifra">{{ fmtSoles(c.igv) }}</span></div>
             <div v-if="Number(c.descuento_global) > 0">
-              <span>Descuento</span><span class="mono">− {{ fmtSoles(c.descuento_global) }}</span>
+              <span>Descuento</span><span class="cifra">− {{ fmtSoles(c.descuento_global) }}</span>
             </div>
-            <div class="total"><span>Total</span><span class="mono">{{ fmtSoles(c.total) }}</span></div>
+            <div class="total"><span>Total</span><span class="cifra">{{ fmtSoles(c.total) }}</span></div>
             <div v-if="Number(c.saldo_pendiente) > 0" class="saldo">
-              <span>Saldo pendiente</span><span class="mono">{{ fmtSoles(c.saldo_pendiente) }}</span>
+              <span>Saldo pendiente</span><span class="cifra">{{ fmtSoles(c.saldo_pendiente) }}</span>
             </div>
           </div>
 
@@ -111,10 +111,10 @@
                 <thead><tr><th>Número</th><th>Motivo</th><th>Fecha</th><th class="num">Monto</th></tr></thead>
                 <tbody>
                   <tr v-for="n in c.notas_credito" :key="n.id">
-                    <td class="mono">{{ n.numero_completo }}</td>
+                    <td class="codigo">{{ n.numero_completo }}</td>
                     <td class="muted">{{ n.motivo || "—" }}</td>
-                    <td class="mono">{{ fmtFechaHora(n.fecha_emision) }}</td>
-                    <td class="num mono">− {{ fmtSoles(n.total) }}</td>
+                    <td class="cifra">{{ fmtFechaHora(n.fecha_emision) }}</td>
+                    <td class="num cifra">− {{ fmtSoles(n.total) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -129,10 +129,10 @@
                 <thead><tr><th>Número</th><th>Método</th><th>Fecha</th><th class="num">Monto</th></tr></thead>
                 <tbody>
                   <tr v-for="p in c.pagos" :key="p.id">
-                    <td class="mono">{{ p.numero }}</td>
+                    <td class="codigo">{{ p.numero }}</td>
                     <td>{{ capitalizar(p.metodo) }}</td>
-                    <td class="mono">{{ fmtFechaHora(p.fecha_pago) }}</td>
-                    <td class="num mono">{{ fmtSoles(p.monto_aplicado) }}</td>
+                    <td class="cifra">{{ fmtFechaHora(p.fecha_pago) }}</td>
+                    <td class="num cifra">{{ fmtSoles(p.monto_aplicado) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -164,14 +164,27 @@
       </template>
     </div>
 
+    <CobroModal
+      v-if="modalCobro && c"
+      :comprobante="{
+        id: c.id,
+        numero_completo: c.numero_completo,
+        cliente_id: c.cliente?.id,
+        cliente: c.cliente?.razon_social || c.cliente?.nombre_completo,
+        saldo_pendiente: c.saldo_pendiente,
+      }"
+      @close="modalCobro = false"
+      @cobrado="onCobrado"
+    />
+
     <!-- Nota de crédito: total, o sólo los ítems que se devuelven -->
-    <div v-if="modalNota" class="modal-back" @click.stop="modalNota = false">
+    <div v-if="modalNota" class="modal-back" v-dialogo="() => (modalNota = false)">
       <div class="modal" @click.stop>
         <div class="m-head"><h3>Nota de crédito sobre {{ c.numero_completo }}</h3></div>
         <div class="m-body">
           <div class="field">
-            <label>Motivo <span class="req">*</span></label>
-            <select v-model="nota.motivo">
+            <label for="comprobant-motivo">Motivo <span class="req">*</span></label>
+            <select id="comprobant-motivo" v-model="nota.motivo">
               <option value="">Seleccionar…</option>
               <option value="Anulación de la operación">Anulación de la operación</option>
               <option value="Devolución total">Devolución total</option>
@@ -193,7 +206,7 @@
                 <tbody>
                   <tr v-for="i in c.items" :key="i.id">
                     <td>{{ i.descripcion }}</td>
-                    <td class="num mono">{{ i.cantidad }}</td>
+                    <td class="num cifra">{{ i.cantidad }}</td>
                     <td class="num">
                       <input
                         v-model.number="nota.cantidades[i.id]"
@@ -238,7 +251,7 @@ import {
   CheckCircle2, AlertTriangle, Clock, FileText,
 } from "lucide-vue-next";
 import { facturacionApi } from "../api/facturacion.api.js";
-import { pagosApi } from "../../pagos/api/pagos.api.js";
+import CobroModal from "../../pagos/components/CobroModal.vue";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtSoles, fmtDate } from "../../../shared/components/ui/format.js";
 import { fmtFechaHora, capitalizar } from "../../../shared/components/ui/format.js";
@@ -254,6 +267,7 @@ const puedeCobrar = computed(() => hasPermission("pagos:registrar"));
 const c = ref(null);
 const cargando = ref(true);
 const modalNota = ref(false);
+const modalCobro = ref(false);
 const emitiendo = ref(false);
 const nota = reactive({ motivo: "", cantidades: {}, repone_stock: true, devolver_a_pendientes: false });
 
@@ -321,6 +335,9 @@ async function cargar() {
   try {
     const r = await facturacionApi.obtener(props.comprobanteId);
     c.value = r.data;
+  } catch (e) {
+    notify.error("No se pudo cargar el comprobante", e.message);
+    if (!c.value) emit("close");
   } finally {
     cargando.value = false;
   }
@@ -406,36 +423,15 @@ async function emitirNota() {
   }
 }
 
-async function cobrar() {
-  const monto = await notify.prompt("Registrar cobro", {
-    text: `Saldo pendiente: ${fmtSoles(c.value.saldo_pendiente)}`,
-    inputType: "number",
-    defaultValue: String(c.value.saldo_pendiente),
-  });
-  if (!monto) return;
+/** El cobro se hace en su propio modal: monto, medio(s), n.º de operación y vuelto. */
+function cobrar() {
+  modalCobro.value = true;
+}
 
-  const metodo = await notify.select("Método de pago", [
-    { value: "efectivo", label: "Efectivo" },
-    { value: "tarjeta", label: "Tarjeta" },
-    { value: "yape", label: "Yape" },
-    { value: "plin", label: "Plin" },
-    { value: "transferencia", label: "Transferencia" },
-  ], "efectivo");
-  if (!metodo) return;
-
-  try {
-    await pagosApi.registrar({
-      cliente_id: c.value.cliente.id,
-      monto: Number(monto),
-      metodo,
-      aplicaciones: [{ comprobante_id: c.value.id, monto: Number(monto) }],
-    });
-    notify.success("Cobro registrado");
-    await cargar();
-    emit("cambiado");
-  } catch (e) {
-    notify.error("No se pudo registrar el cobro", e.message);
-  }
+async function onCobrado() {
+  modalCobro.value = false;
+  await cargar();
+  emit("cambiado");
 }
 
 onMounted(cargar);

@@ -27,7 +27,12 @@ colar un archivo antes que otro del que depende.
 | `10` | Helpers de `internal` |
 | `20`–`50` | SPs por dominio (auth, sedes, users, roles, clientes, mascotas, catálogos, citas, clínico, inventario, compras, facturación, pagos/caja, RRHH, dashboard, reportes, portal, auditoría) |
 | `90` | Rol de aplicación y grants |
-| `98`–`99` | Seeds base y datos de demostración |
+| `98` | Datos base: permisos, roles y especies. Nunca crea usuarios. |
+
+Los datos de demostración (dos clínicas, usuarios con clave `Demo2026!`, cartera y
+operación) están en `db/seeds/` y solo se cargan con `SEED_DEMO=1`, y solo en una
+base cuyo nombre indique dev/demo/test. Una instalación de producción crea su
+primer usuario con `db/scripts/crear-superadmin.sh`.
 
 ## Convenciones
 

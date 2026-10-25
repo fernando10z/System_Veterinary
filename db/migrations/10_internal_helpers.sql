@@ -535,7 +535,18 @@ AS $$
 $$;
 
 -- -----------------------------------------------------------------------------
--- internal.recalcular_saldo_comprobante
+-- internal.recalcular_saldo_comprobante — la ÚNICA fórmula del saldo
+--
+--   saldo = total − cobros vigentes − notas de crédito vigentes que lo corrigen
+--
+-- Antes había dos fórmulas (esta y la del trigger de ítems) y ninguna restaba
+-- las notas de crédito: la nota bajaba el saldo a mano, y el siguiente cobro o
+-- la anulación de un cobro lo recalculaba sin ella. Una factura de 100 con una
+-- nota de 30 y un cobro de 70 volvía a deber 30. Ahora todo el que toca un
+-- saldo llama aquí, y el saldo sale siempre de los hechos, no de su historia.
+--
+-- Una nota de crédito no es deuda de nadie: su saldo es cero siempre. Un
+-- comprobante anulado, tampoco.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION internal.recalcular_saldo_comprobante(p_comprobante_id UUID)
 RETURNS VOID
@@ -544,25 +555,49 @@ SECURITY DEFINER
 SET search_path = core, internal, public
 AS $$
 DECLARE
-  v_total    NUMERIC(14,2);
-  v_aplicado NUMERIC(14,2);
-  v_saldo    NUMERIC(14,2);
+  v_c         RECORD;
+  v_aplicado  NUMERIC(14,2);
+  v_acreditado NUMERIC(14,2);
+  v_saldo     NUMERIC(14,2);
 BEGIN
-  SELECT total INTO v_total FROM core.comprobantes WHERE id = p_comprobante_id;
-  IF v_total IS NULL THEN RETURN; END IF;
+  SELECT id, tipo, total, anulado_at INTO v_c
+    FROM core.comprobantes WHERE id = p_comprobante_id;
+  IF NOT FOUND THEN RETURN; END IF;
+
+  IF v_c.anulado_at IS NOT NULL THEN
+    UPDATE core.comprobantes
+       SET saldo_pendiente = 0, estado_pago = 'anulado', updated_at = now()
+     WHERE id = p_comprobante_id;
+    RETURN;
+  END IF;
+
+  IF v_c.tipo IN ('nota_credito','nota_debito') THEN
+    UPDATE core.comprobantes
+       SET saldo_pendiente = 0, estado_pago = 'pagado', updated_at = now()
+     WHERE id = p_comprobante_id;
+    RETURN;
+  END IF;
 
   SELECT COALESCE(SUM(pa.monto_aplicado), 0) INTO v_aplicado
-  FROM core.pago_aplicaciones pa
-  JOIN core.pagos p ON p.id = pa.pago_id AND p.anulado_at IS NULL
-  WHERE pa.comprobante_id = p_comprobante_id;
+    FROM core.pago_aplicaciones pa
+    JOIN core.pagos p ON p.id = pa.pago_id AND p.anulado_at IS NULL
+   WHERE pa.comprobante_id = p_comprobante_id;
 
-  v_saldo := v_total - v_aplicado;
+  SELECT COALESCE(SUM(nc.total), 0) INTO v_acreditado
+    FROM core.comprobantes nc
+   WHERE nc.documento_ref_id = p_comprobante_id
+     AND nc.tipo = 'nota_credito'
+     AND nc.anulado_at IS NULL AND nc.deleted_at IS NULL;
+
+  -- Si la nota llega después de cobrar, lo que sobra es un saldo a favor del
+  -- cliente que se devuelve por caja; la deuda del documento no baja de cero.
+  v_saldo := GREATEST(COALESCE(v_c.total, 0) - v_aplicado - v_acreditado, 0);
 
   UPDATE core.comprobantes
      SET saldo_pendiente = v_saldo,
          estado_pago = CASE
-           WHEN v_saldo <= 0   THEN 'pagado'::core.estado_pago
-           WHEN v_aplicado > 0 THEN 'parcial'::core.estado_pago
+           WHEN v_saldo <= 0 THEN 'pagado'::core.estado_pago
+           WHEN v_aplicado > 0 OR v_acreditado > 0 THEN 'parcial'::core.estado_pago
            ELSE 'pendiente'::core.estado_pago
          END,
          updated_at = now()
@@ -752,6 +787,23 @@ AS $$
 $$;
 
 -- -----------------------------------------------------------------------------
+-- internal.bloquear_agenda — serializa las reservas de un mismo veterinario
+--
+-- hay_solapamiento_cita responde "¿está libre?" y el SP inserta después. Entre
+-- una cosa y otra, otra recepcionista podía hacer la misma pregunta, recibir
+-- el mismo "sí" y reservar el mismo hueco. El candado es por veterinario y
+-- dura lo que la transacción: dos reservas del mismo profesional se hacen en
+-- fila; las de profesionales distintos no se esperan.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.bloquear_agenda(p_veterinario_id UUID)
+RETURNS VOID
+LANGUAGE sql
+AS $$
+  SELECT pg_advisory_xact_lock(hashtextextended('agenda:' || p_veterinario_id::text, 0))
+   WHERE p_veterinario_id IS NOT NULL;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- internal.lotes_a_consumir — FEFO: qué lote sale primero
 --
 -- Devuelve la repartición de una salida entre los lotes del producto, del
@@ -872,9 +924,11 @@ DECLARE
   v_id       UUID;
   v_stock    NUMERIC;
   v_almacen  UUID;
+  v_destino  UUID := NULLIF(p_refs->>'almacen_destino_id','')::uuid;
   v_es_salida BOOLEAN;
   v_lotes    BOOLEAN;
   v_lote_ref UUID := NULLIF(p_refs->>'lote_id','')::uuid;
+  v_lote_disp NUMERIC;
   v_saca_vencidos BOOLEAN;
   v_repartido NUMERIC := 0;
   v_tramo    RECORD;
@@ -883,30 +937,84 @@ BEGIN
     RAISE EXCEPTION 'La cantidad del movimiento debe ser mayor a cero' USING ERRCODE = 'P0001';
   END IF;
 
-  v_almacen := COALESCE(p_almacen_id, (
-    SELECT id FROM core.almacenes
-     WHERE empresa_id = p_empresa_id AND es_principal = true LIMIT 1));
+  -- El producto tiene que ser de la empresa que mueve. Sin esto, un id ajeno
+  -- descontaba el almacén de otra clínica.
+  SELECT maneja_lotes INTO v_lotes FROM core.productos
+   WHERE id = p_producto_id AND empresa_id = p_empresa_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Producto no encontrado' USING ERRCODE = 'P0002';
+  END IF;
+
+  -- Almacén: el indicado (si es de la empresa) → el de la sede donde trabaja
+  -- quien mueve → el principal de la empresa. Antes siempre era el principal,
+  -- y una venta en el segundo local descontaba el stock del primero.
+  IF p_almacen_id IS NOT NULL THEN
+    SELECT id INTO v_almacen FROM core.almacenes
+     WHERE id = p_almacen_id AND empresa_id = p_empresa_id;
+    IF v_almacen IS NULL THEN
+      RAISE EXCEPTION 'Almacén no encontrado' USING ERRCODE = 'P0002';
+    END IF;
+  ELSE
+    SELECT a.id INTO v_almacen FROM core.almacenes a
+     WHERE a.empresa_id = p_empresa_id AND a.estado = 'activo'
+       AND a.sede_id = internal.sede_efectiva(p_user_id, p_empresa_id)
+     ORDER BY a.es_principal DESC, a.created_at
+     LIMIT 1;
+    IF v_almacen IS NULL THEN
+      SELECT id INTO v_almacen FROM core.almacenes
+       WHERE empresa_id = p_empresa_id AND es_principal = true LIMIT 1;
+    END IF;
+  END IF;
+
+  IF v_destino IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM core.almacenes WHERE id = v_destino AND empresa_id = p_empresa_id) THEN
+    RAISE EXCEPTION 'Almacén de destino no encontrado' USING ERRCODE = 'P0002';
+  END IF;
+
+  IF v_lote_ref IS NOT NULL THEN
+    SELECT cantidad INTO v_lote_disp FROM core.lotes
+     WHERE id = v_lote_ref AND producto_id = p_producto_id AND empresa_id = p_empresa_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'El lote indicado no corresponde al producto' USING ERRCODE = 'P0002';
+    END IF;
+  END IF;
 
   v_es_salida := p_tipo IN ('salida','ajuste_negativo','merma','vencimiento','transferencia');
 
-  -- Una salida no puede dejar el stock en negativo
+  -- Una salida no puede dejar el stock en negativo.
+  --
+  -- La fila de stock se bloquea ANTES de sumar: sin el bloqueo, dos ventas
+  -- simultáneas del último frasco leían las dos "queda 1" y las dos salían.
+  -- Con él, la segunda espera a que la primera confirme y lee "queda 0".
   IF v_es_salida THEN
+    PERFORM 1 FROM core.stock
+      WHERE producto_id = p_producto_id AND almacen_id = v_almacen
+      FOR UPDATE;
     SELECT COALESCE(SUM(cantidad), 0) INTO v_stock
-      FROM core.stock WHERE producto_id = p_producto_id
-       AND (v_almacen IS NULL OR almacen_id = v_almacen);
+      FROM core.stock WHERE producto_id = p_producto_id AND almacen_id = v_almacen;
     IF v_stock < p_cantidad THEN
       RAISE EXCEPTION 'Stock insuficiente: disponible %, solicitado %', v_stock, p_cantidad
         USING ERRCODE = 'P0001';
     END IF;
-  END IF;
 
-  SELECT maneja_lotes INTO v_lotes FROM core.productos WHERE id = p_producto_id;
+    IF v_lote_ref IS NOT NULL AND p_tipo <> 'transferencia' AND v_lote_disp < p_cantidad THEN
+      RAISE EXCEPTION 'Stock insuficiente en el lote: disponible %, solicitado %',
+        v_lote_disp, p_cantidad USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
 
   -- Salida de un producto con lotes y sin lote indicado: se reparte por FEFO.
   IF v_es_salida AND COALESCE(v_lotes, false) AND v_lote_ref IS NULL
      AND p_tipo <> 'transferencia'
      AND EXISTS (SELECT 1 FROM core.lotes WHERE producto_id = p_producto_id AND cantidad > 0)
   THEN
+    -- Mismo motivo que arriba: los lotes se bloquean antes de repartir, en un
+    -- orden fijo para que dos salidas concurrentes no se esperen en cruz.
+    PERFORM 1 FROM core.lotes
+      WHERE producto_id = p_producto_id AND cantidad > 0
+      ORDER BY id FOR UPDATE;
+
     -- Los movimientos que existen para retirar producto vencido sí lo alcanzan;
     -- una salida clínica o una venta, no.
     v_saca_vencidos := p_tipo IN ('merma','vencimiento','ajuste_negativo');
@@ -1177,7 +1285,8 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas WHERE id = p_mascota_id;
+  SELECT cliente_id INTO v_cliente FROM core.mascotas
+   WHERE id = p_mascota_id AND empresa_id = p_empresa_id;
   IF v_cliente IS NULL THEN RETURN NULL; END IF;
 
   SELECT COALESCE(NULLIF(p_refs->>'precio_unitario','')::numeric, s.precio)
@@ -1194,6 +1303,13 @@ BEGIN
        AND estado <> 'anulado';
     IF v_id IS NOT NULL THEN RETURN v_id; END IF;
   END IF;
+
+  -- El plan activo del paciente se bloquea antes de mirar su cupo. Sin esto,
+  -- dos cargos simultáneos leían los dos "queda 1 consulta" y el plan de 4
+  -- consultas terminaba cubriendo 5.
+  PERFORM 1 FROM core.suscripciones
+    WHERE mascota_id = p_mascota_id AND empresa_id = p_empresa_id AND estado = 'activa'
+    FOR UPDATE;
 
   -- ¿Lo cubre el plan preventivo del paciente?
   --
@@ -1240,4 +1356,96 @@ BEGIN
 
   RETURN v_id;
 END;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- internal.cargar_cuota_plan — la cuota del plan llega a la cuenta
+--
+-- Un plan que regala consultas y no cobra su cuota es un descuento
+-- disfrazado. La cuota es una orden de servicio más: aparece en lo pendiente
+-- del propietario y se cobra con boleta como todo lo demás.
+--
+-- Va directa, sin pasar por registrar_cargo_servicio, a propósito: la cuota
+-- no puede recibir el descuento del mismo plan que está pagando.
+--
+-- Idempotente por periodo: el mismo mes no se carga dos veces aunque el
+-- trabajo diario corra dos veces.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.cargar_cuota_plan(
+  p_suscripcion_id UUID,
+  p_user_id        UUID,
+  p_periodo        DATE
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, internal, public
+AS $$
+DECLARE
+  v_s        RECORD;
+  v_servicio UUID;
+  v_origen   UUID := md5(p_suscripcion_id::text || ':' || p_periodo::text)::uuid;
+  v_id       UUID;
+BEGIN
+  SELECT s.*, p.codigo AS plan_codigo, p.nombre AS plan_nombre
+    INTO v_s
+    FROM core.suscripciones s JOIN core.planes p ON p.id = s.plan_id
+   WHERE s.id = p_suscripcion_id;
+  IF NOT FOUND OR COALESCE(v_s.precio_pactado, 0) <= 0 THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT id INTO v_id FROM core.ordenes_servicio
+   WHERE empresa_id = v_s.empresa_id AND origen_tabla = 'suscripcion_cuota'
+     AND origen_id = v_origen AND estado <> 'anulado';
+  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+
+  -- El servicio "cuota del plan" se crea la primera vez que se necesita: la
+  -- clínica no tiene que acordarse de darlo de alta en su tarifario.
+  SELECT id INTO v_servicio FROM core.servicios
+   WHERE empresa_id = v_s.empresa_id AND codigo = left('PLAN-' || v_s.plan_codigo, 40);
+  IF v_servicio IS NULL THEN
+    INSERT INTO core.servicios (
+      empresa_id, codigo, nombre, descripcion, tipo, precio, requiere_cita, created_by)
+    VALUES (
+      v_s.empresa_id, left('PLAN-' || v_s.plan_codigo, 40),
+      left('Cuota ' || v_s.plan_nombre, 180),
+      'Cuota del plan preventivo. Creado automáticamente al vender el plan.',
+      'otro', v_s.precio_pactado, false, p_user_id)
+    RETURNING id INTO v_servicio;
+  END IF;
+
+  INSERT INTO core.ordenes_servicio (
+    empresa_id, codigo, mascota_id, cliente_id, servicio_id, veterinario_id,
+    cantidad, precio_unitario, descuento, total, descripcion,
+    origen_tabla, origen_id, estado, created_by, suscripcion_id)
+  VALUES (
+    v_s.empresa_id, internal.siguiente_numero(v_s.empresa_id, 'OS', 6),
+    v_s.mascota_id, v_s.cliente_id, v_servicio, NULL,
+    1, v_s.precio_pactado, 0, v_s.precio_pactado,
+    format('Cuota %s — periodo desde %s', v_s.plan_nombre, to_char(p_periodo, 'DD/MM/YYYY')),
+    'suscripcion_cuota', v_origen, 'completado', p_user_id, v_s.id)
+  RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- internal.siguiente_periodo_plan
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION internal.siguiente_periodo_plan(
+  p_desde        DATE,
+  p_periodicidad core.periodicidad_plan
+)
+RETURNS DATE
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT (p_desde + CASE p_periodicidad
+            WHEN 'mensual'    THEN INTERVAL '1 month'
+            WHEN 'trimestral' THEN INTERVAL '3 months'
+            WHEN 'semestral'  THEN INTERVAL '6 months'
+            ELSE INTERVAL '1 year' END)::date;
 $$;

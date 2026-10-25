@@ -28,6 +28,11 @@ else
   exit 1
 fi
 
+# Variables de entorno que hay que hacer llegar al psql del contenedor (p. ej.
+# un secreto que se lee con \getenv). `-e NOMBRE` sin valor: docker lo toma del
+# entorno de este proceso y el secreto no aparece en la línea de comandos.
+PSQL_DOCKER_ENV=()
+
 # run_psql <args...>  — acepta -f archivo, -c "sql", etc.
 # En modo docker el archivo se envía por stdin (el contenedor no ve el FS del host).
 run_psql() {
@@ -44,11 +49,11 @@ run_psql() {
       esac
     done
     if [[ -n "$file" ]]; then
-      docker exec -i -e PGPASSWORD="$DB_PASSWORD" "$DB_CONTAINER" \
+      docker exec -i -e PGPASSWORD="$DB_PASSWORD" ${PSQL_DOCKER_ENV[@]+"${PSQL_DOCKER_ENV[@]}"} "$DB_CONTAINER" \
         psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 --quiet --no-psqlrc \
         "${args[@]}" < "$file"
     else
-      docker exec -i -e PGPASSWORD="$DB_PASSWORD" "$DB_CONTAINER" \
+      docker exec -i -e PGPASSWORD="$DB_PASSWORD" ${PSQL_DOCKER_ENV[@]+"${PSQL_DOCKER_ENV[@]}"} "$DB_CONTAINER" \
         psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 --quiet --no-psqlrc "${args[@]}"
     fi
   fi

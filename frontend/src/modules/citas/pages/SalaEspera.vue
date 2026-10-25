@@ -10,7 +10,7 @@
           <RefreshCw :size="14" :class="{ spin: cargando }" /> Actualizar
         </button>
         <router-link class="btn" to="/agenda"><Calendar :size="14" /> Agenda</router-link>
-        <button v-if="puedeCrear" class="btn primary" @click="modalLlegada = true">
+        <button v-if="puedeCrear" class="btn primary" @click="abrirLlegada">
           <LogIn :size="14" /> Registrar llegada
         </button>
       </template>
@@ -97,9 +97,10 @@
             <button
               v-if="c.estado === 'en_espera'"
               class="btn mini primary"
+              :disabled="pasando === c.id"
               @click="pasar(c)"
             >
-              Pasar a consulta
+              {{ pasando === c.id ? "Abriendo…" : "Pasar a consulta" }}
             </button>
             <router-link
               v-else-if="c.consulta_id"
@@ -108,24 +109,39 @@
             >
               Abrir consulta
             </router-link>
-            <button v-else class="btn mini primary" @click="pasar(c)">Abrir consulta</button>
+            <button v-else class="btn mini primary" :disabled="pasando === c.id" @click="pasar(c)">Abrir consulta</button>
           </template>
 
           <button v-if="puedeEditar && c.estado === 'en_espera'" class="btn mini" @click="noAsistio(c)">
             No espera
           </button>
+          <button v-if="puedeCobrar && c.estado === 'en_atencion'" class="btn mini" @click="cobroCita = c">
+            <Wallet :size="12" /> Cobrar
+          </button>
         </div>
       </article>
     </div>
 
+    <!-- ---------- Cobro al terminar la atención ---------- -->
+    <CobroRapido
+      v-if="cobroCita"
+      :cliente="{ id: cobroCita.cliente_id, nombre_completo: cobroCita.cliente }"
+      :mascota="cobroCita.mascota"
+      :mascota-id="cobroCita.mascota_id"
+      :cita-id="cobroCita.id"
+      :consulta-id="cobroCita.consulta_id || ''"
+      @close="cobroCita = null"
+      @listo="cobroCita = null; cargar()"
+    />
+
     <!-- ---------- Registrar llegada ---------- -->
-    <div v-if="modalLlegada" class="modal-back" @click="modalLlegada = false">
-      <div class="modal" @click.stop>
+    <div v-if="modalLlegada" class="modal-back" v-dialogo="() => (modalLlegada = false)">
+      <div class="modal modal-wide" @click.stop>
         <div class="m-head"><h3>Registrar llegada</h3></div>
         <div class="m-body">
           <div class="field">
-            <label>¿Tenía cita?</label>
-            <select v-model="llegada.cita_id">
+            <label for="llegada-cita">¿Tenía cita?</label>
+            <select id="llegada-cita" v-model="llegada.cita_id">
               <option value="">No — atención sin cita</option>
               <option v-for="c in citasHoy" :key="c.id" :value="c.id">
                 {{ fmtHora(c.fecha_hora) }} · {{ c.mascota }} · {{ c.cliente }}
@@ -135,24 +151,23 @@
 
           <template v-if="!llegada.cita_id">
             <div class="field">
-              <label>Paciente <span class="req">*</span></label>
-              <select v-model="llegada.mascota_id">
-                <option value="">Seleccionar…</option>
-                <option v-for="m in mascotas" :key="m.id" :value="m.id">
-                  {{ m.nombre }} — {{ m.propietario }}
-                </option>
-              </select>
-              <small class="muted">
-                ¿No está en la lista? Regístralo primero en Pacientes.
-              </small>
+              <label for="llegada-buscar">Paciente <span class="req">*</span></label>
+              <div v-if="mascotaSel" class="sel-paciente">
+                <div class="grow">
+                  <strong>{{ mascotaSel.nombre }}</strong>
+                  <small>{{ mascotaSel.especie }} · {{ clienteSel?.nombre_completo }}</small>
+                </div>
+                <button class="btn mini" type="button" @click="limpiarPaciente">Cambiar</button>
+              </div>
+              <BuscadorPaciente v-else input-id="llegada-buscar" @elegir="elegirPaciente" />
             </div>
             <div class="field">
-              <label>Motivo</label>
-              <input v-model.trim="llegada.motivo" type="text" placeholder="Qué le pasa" />
+              <label for="llegada-motivo">Motivo</label>
+              <input id="llegada-motivo" v-model.trim="llegada.motivo" type="text" placeholder="Qué le pasa" />
             </div>
             <div class="field">
-              <label>Veterinario</label>
-              <select v-model="llegada.veterinario_id">
+              <label for="llegada-vet">Veterinario</label>
+              <select id="llegada-vet" v-model="llegada.veterinario_id">
                 <option value="">Asignar después</option>
                 <option v-for="v in veterinarios" :key="v.id" :value="v.id">
                   {{ fmtNombreCorto(v) }}
@@ -162,8 +177,8 @@
           </template>
 
           <div class="field">
-            <label>Triaje</label>
-            <select v-model="llegada.prioridad">
+            <label for="llegada-triaje">Triaje</label>
+            <select id="llegada-triaje" v-model="llegada.prioridad">
               <option value="normal">Normal — puede esperar</option>
               <option value="preferente">Preferente — gestante, cachorro, geronte</option>
               <option value="urgencia">Urgencia — atender pronto</option>
@@ -189,11 +204,12 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import {
-  RefreshCw, Calendar, LogIn, AlertCircle, AlertTriangle, User, Clock, MessageSquare,
+  RefreshCw, Calendar, LogIn, AlertCircle, AlertTriangle, User, Clock, MessageSquare, Wallet,
 } from "lucide-vue-next";
+import BuscadorPaciente from "../../mascotas/components/BuscadorPaciente.vue";
+import CobroRapido from "../../facturacion/components/CobroRapido.vue";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import { citasApi } from "../api/citas.api.js";
-import { mascotasApi } from "../../mascotas/api/mascotas.api.js";
 import { usersApi } from "../../users/api/users.api.js";
 import { clinicoApi } from "../../clinico/api/clinico.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
@@ -205,6 +221,8 @@ const { hasPermission } = useAuth();
 const puedeCrear = computed(() => hasPermission("citas:crear"));
 const puedeEditar = computed(() => hasPermission("citas:editar"));
 const puedeAtender = computed(() => hasPermission("clinico:registrar"));
+const puedeCobrar = computed(() => hasPermission("facturacion:emitir"));
+const cobroCita = ref(null);
 
 const cola = ref([]);
 const meta = ref({});
@@ -214,11 +232,31 @@ const error = ref("");
 
 const modalLlegada = ref(false);
 const llegada = reactive({ cita_id: "", mascota_id: "", motivo: "", veterinario_id: "", prioridad: "normal" });
-const mascotas = ref([]);
+// El paciente sin cita se busca (no un <select> con los primeros 100: en una
+// clínica con historia, el que llega casi nunca estaría en la lista).
+const clienteSel = ref(null);
+const mascotaSel = ref(null);
 const veterinarios = ref([]);
 const citasHoy = ref([]);
 
 const puedeGuardar = computed(() => llegada.cita_id || llegada.mascota_id);
+
+function elegirPaciente(c, m) {
+  clienteSel.value = c;
+  mascotaSel.value = m;
+  llegada.mascota_id = m.id;
+}
+function limpiarPaciente() {
+  clienteSel.value = null;
+  mascotaSel.value = null;
+  llegada.mascota_id = "";
+}
+function abrirLlegada() {
+  Object.assign(llegada, { cita_id: "", mascota_id: "", motivo: "", veterinario_id: "", prioridad: "normal" });
+  limpiarPaciente();
+  cargarApoyo();
+  modalLlegada.value = true;
+}
 
 /**
  * Los que ya están en consulta no ocupan turno en la fila: el número que ve el
@@ -248,16 +286,14 @@ async function cargarApoyo() {
   // por la sala.
   const hoy = new Date();
   const desde = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  const hasta = new Date(desde.getTime() + 86400000);
+  const hasta = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1);
   const iso = (d) => d.toISOString();
 
-  const [m, v, c] = await Promise.all([
-    mascotasApi.listar({ pageSize: 200 }).catch(() => ({ data: [] })),
+  const [v, c] = await Promise.all([
     usersApi.veterinarios().catch(() => ({ data: [] })),
     citasApi.listar({ desde: iso(desde), hasta: iso(hasta), pageSize: 100 })
       .catch(() => ({ data: [] })),
   ]);
-  mascotas.value = m.data ?? [];
   veterinarios.value = v.data ?? [];
   citasHoy.value = (c.data ?? []).filter((x) =>
     ["programada", "confirmada"].includes(x.estado),
@@ -265,6 +301,7 @@ async function cargarApoyo() {
 }
 
 async function guardarLlegada() {
+  if (guardando.value) return;
   guardando.value = true;
   try {
     const p = { prioridad: llegada.prioridad };
@@ -278,6 +315,7 @@ async function guardarLlegada() {
     notify.success("Llegada registrada");
     modalLlegada.value = false;
     Object.assign(llegada, { cita_id: "", mascota_id: "", motivo: "", veterinario_id: "", prioridad: "normal" });
+    limpiarPaciente();
     await Promise.all([cargar(), cargarApoyo()]);
   } catch (e) {
     notify.error("No se pudo registrar la llegada", e.message);
@@ -287,9 +325,13 @@ async function guardarLlegada() {
 }
 
 /** Pasar a consulta: marca en atención y abre (o crea) la consulta. */
+const pasando = ref(null);
 async function pasar(c) {
+  // Un doble clic no debe abrir dos consultas para el mismo paciente.
+  if (pasando.value) return;
+  pasando.value = c.id;
   try {
-    await citasApi.cambiarEstado(c.id, "en_atencion");
+    if (c.estado !== "en_atencion") await citasApi.cambiarEstado(c.id, "en_atencion");
     if (c.consulta_id) {
       router.push(`/consultas/${c.consulta_id}`);
       return;
@@ -304,6 +346,8 @@ async function pasar(c) {
   } catch (e) {
     notify.error("No se pudo pasar a consulta", e.message);
     await cargar();
+  } finally {
+    pasando.value = null;
   }
 }
 
@@ -332,6 +376,14 @@ onUnmounted(() => clearInterval(timer));
 </script>
 
 <style scoped>
+.sel-paciente {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--emerald-soft); border: 1px solid var(--emerald-line);
+}
+.sel-paciente strong { display: block; font-size: 13.5px; color: var(--ink); }
+.sel-paciente small { font-size: 11.5px; color: var(--ink-3); }
+.req { color: var(--red); }
 .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -348,7 +400,7 @@ onUnmounted(() => clearInterval(timer));
   gap: 2px;
 }
 .kpi .k { font-size: 11.5px; color: var(--ink-3) }
-.kpi .v { font-size: 21px; font-weight: 700; color: var(--ink) }
+.kpi .v { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-size: 21px; font-weight: 700; color: var(--ink) }
 .kpi.alerta { border-color: var(--red-line, #e6bcbc) }
 .kpi.alerta .v { color: var(--red-ink, #a33) }
 
@@ -416,6 +468,7 @@ onUnmounted(() => clearInterval(timer));
 
 .acciones { display: flex; flex-direction: column; gap: 6px; justify-content: center }
 .acciones .btn { white-space: nowrap }
+.btn.mini { height: 26px; padding: 0 9px; font-size: 11.5px; }
 
 @media (max-width: 720px) {
   .ficha { flex-wrap: wrap }

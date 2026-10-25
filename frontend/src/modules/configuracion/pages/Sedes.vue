@@ -67,33 +67,33 @@
       </p>
     </div>
 
-    <div v-if="modal" class="modal-back" @click="modal = null">
+    <div v-if="modal" class="modal-back" v-dialogo="() => (modal = null)">
       <div class="modal modal-wide" @click.stop>
         <div class="m-head"><h3>{{ modal.id ? "Editar sede" : "Nueva sede" }}</h3></div>
         <div class="m-body">
           <div class="form-grid">
             <div class="field" style="grid-column: 1 / -1">
-              <label>Nombre <span class="req">*</span></label>
-              <input v-model="modal.nombre" placeholder="Sede Surco" />
+              <label for="sedes-nombre">Nombre <span class="req">*</span></label>
+              <input id="sedes-nombre" v-model="modal.nombre" placeholder="Sede Surco" />
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Dirección</label>
-              <input v-model="modal.direccion" />
+              <label for="sedes-direccion">Dirección</label>
+              <input id="sedes-direccion" v-model="modal.direccion" />
             </div>
-            <div class="field"><label>Distrito</label><input v-model="modal.distrito" /></div>
-            <div class="field"><label>Provincia</label><input v-model="modal.provincia" /></div>
-            <div class="field"><label>Departamento</label><input v-model="modal.departamento" /></div>
-            <div class="field"><label>Ubigeo</label><input v-model="modal.ubigeo" maxlength="6" /></div>
-            <div class="field"><label>Teléfono</label><input v-model="modal.telefono" /></div>
-            <div class="field"><label>Correo</label><input v-model="modal.correo" type="email" /></div>
+            <div class="field"><label for="sedes-distrito">Distrito</label><input id="sedes-distrito" v-model="modal.distrito" /></div>
+            <div class="field"><label for="sedes-provincia">Provincia</label><input id="sedes-provincia" v-model="modal.provincia" /></div>
+            <div class="field"><label for="sedes-departamento">Departamento</label><input id="sedes-departamento" v-model="modal.departamento" /></div>
+            <div class="field"><label for="sedes-ubigeo">Ubigeo</label><input id="sedes-ubigeo" v-model="modal.ubigeo" maxlength="6" /></div>
+            <div class="field"><label for="sedes-telefono">Teléfono</label><input id="sedes-telefono" v-model="modal.telefono" /></div>
+            <div class="field"><label for="sedes-correo">Correo</label><input id="sedes-correo" v-model="modal.correo" type="email" /></div>
             <div class="field">
-              <label>Serie de boleta</label>
-              <input v-model="modal.serie_boleta" maxlength="4" placeholder="B002" />
+              <label for="sedes-serie-boleta">Serie de boleta</label>
+              <input id="sedes-serie-boleta" v-model="modal.serie_boleta" maxlength="4" placeholder="B002" />
               <small class="muted">Serie propia del local: dos mostradores con la misma serie se pisan.</small>
             </div>
             <div class="field">
-              <label>Serie de factura</label>
-              <input v-model="modal.serie_factura" maxlength="4" placeholder="F002" />
+              <label for="sedes-serie-factura">Serie de factura</label>
+              <input id="sedes-serie-factura" v-model="modal.serie_factura" maxlength="4" placeholder="F002" />
             </div>
             <div class="field" style="grid-column: 1 / -1">
               <label class="check-line">
@@ -217,6 +217,6 @@ onMounted(cargar);
 .sede footer { display: flex; gap: 6px; border-top: 1px solid var(--line); padding-top: 9px; margin-top: 8px }
 .pill { font-size: 10.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
         border: 1px solid var(--line-strong); color: var(--ink-3); white-space: nowrap }
-.pill.principal { border-color: #a6d4b4; color: #15803d; background: #eefaf1 }
+.pill.principal { border-color: var(--emerald-line); color: var(--green-ink); background: var(--emerald-soft) }
 .vacio { grid-column: 1 / -1; color: var(--ink-3); font-size: 13px; padding: 18px }
 </style>

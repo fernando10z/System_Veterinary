@@ -84,7 +84,7 @@
                 </router-link>
               </td>
               <td>{{ r.cliente }}</td>
-              <td class="mono">{{ r.cliente_telefono || r.cliente_correo || "—" }}</td>
+              <td class="codigo">{{ r.cliente_telefono || r.cliente_correo || "—" }}</td>
               <td>{{ r.titulo }}</td>
               <td>
                 <span :class="['estado-pill', r.dias_restantes < 0 ? 'danger' : 'warn']">
@@ -132,10 +132,10 @@
             <tr v-for="e in esquemas" :key="e.id">
               <td><strong>{{ e.nombre }}</strong></td>
               <td>{{ e.especie }}</td>
-              <td class="num mono">{{ e.edad_inicio_semanas ? `${e.edad_inicio_semanas} sem` : "—" }}</td>
-              <td class="num mono">{{ e.dosis_totales }}</td>
-              <td class="num mono">{{ e.intervalo_dias ? `${e.intervalo_dias} d` : "—" }}</td>
-              <td class="num mono">{{ e.revacunacion_meses ? `${e.revacunacion_meses} m` : "—" }}</td>
+              <td class="num cifra">{{ e.edad_inicio_semanas ? `${e.edad_inicio_semanas} sem` : "—" }}</td>
+              <td class="num cifra">{{ e.dosis_totales }}</td>
+              <td class="num cifra">{{ e.intervalo_dias ? `${e.intervalo_dias} d` : "—" }}</td>
+              <td class="num cifra">{{ e.revacunacion_meses ? `${e.revacunacion_meses} m` : "—" }}</td>
               <td>
                 <span :class="['estado-pill', e.obligatoria ? 'danger' : 'neutral']">
                   <span class="dot"></span>{{ e.obligatoria ? "Obligatoria" : "Opcional" }}
@@ -161,6 +161,7 @@ import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { inventarioApi } from "../../inventario/api/inventario.api.js";
 import { fmtDate } from "../../../shared/components/ui/format.js";
 import { fmtRelativo, iniciales } from "../../../shared/components/ui/format.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const recordatorios = ref([]);
 const esquemas = ref([]);
@@ -192,6 +193,8 @@ async function cargar() {
     recordatorios.value = (rec.data ?? []).filter((r) => r.tipo === "vacuna");
     esquemas.value = esq.data ?? [];
     vacunas.value = vac.data ?? [];
+  } catch (e) {
+    notify.toast(`No se pudo cargar la vacunación: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

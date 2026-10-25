@@ -165,7 +165,7 @@
               <div class="t">{{ r.titulo }}</div>
               <div class="s">
                 {{ r.mascota }} · {{ r.cliente }}
-                <span v-if="r.cliente_telefono" class="mono"> · {{ r.cliente_telefono }}</span>
+                <span v-if="r.cliente_telefono" class="codigo"> · {{ r.cliente_telefono }}</span>
               </div>
             </div>
             <div class="stack text-right">
@@ -233,7 +233,7 @@
               <div class="barra">
                 <div class="fill" :style="{ width: pctEspecie(e) + '%' }"></div>
               </div>
-              <span class="n mono">{{ e.pacientes }}</span>
+              <span class="n cifra">{{ e.pacientes }}</span>
             </div>
           </div>
         </div>
@@ -268,8 +268,8 @@
                     <span class="tag">{{ capitalizar(s.tipo) }}</span>
                   </div>
                 </td>
-                <td class="num mono">{{ s.veces }}</td>
-                <td class="num mono">{{ fmtSoles(s.ingresos) }}</td>
+                <td class="num cifra">{{ s.veces }}</td>
+                <td class="num cifra">{{ fmtSoles(s.ingresos) }}</td>
               </tr>
             </tbody>
           </table>
@@ -292,6 +292,8 @@ import { citasApi } from "../../citas/api/citas.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtSoles } from "../../../shared/components/ui/format.js";
 import { fmtHora, fmtRelativo, capitalizar } from "../../../shared/components/ui/format.js";
+import { hoyISO, inicioMesISO, sumarDias } from "@/shared/utils/fechas.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const { user } = useAuth();
 const d = ref({});
@@ -353,45 +355,34 @@ function iconoRecordatorio(tipo) {
 
 /** Rango del selector: el backend calcula solo el comparativo del periodo anterior. */
 function rango() {
-  const hoy = new Date();
-  const iso = (x) => x.toISOString().slice(0, 10);
-  if (periodo.value === "hoy") return { desde: iso(hoy), hasta: iso(hoy) };
-  if (periodo.value === "semana") {
-    const d7 = new Date(hoy); d7.setDate(d7.getDate() - 6);
-    return { desde: iso(d7), hasta: iso(hoy) };
-  }
-  if (periodo.value === "trimestre") {
-    const d90 = new Date(hoy); d90.setDate(d90.getDate() - 89);
-    return { desde: iso(d90), hasta: iso(hoy) };
-  }
-  return { desde: iso(new Date(hoy.getFullYear(), hoy.getMonth(), 1)), hasta: iso(hoy) };
+  const hoy = hoyISO();
+  if (periodo.value === "hoy") return { desde: hoy, hasta: hoy };
+  if (periodo.value === "semana") return { desde: sumarDias(hoy, -6), hasta: hoy };
+  if (periodo.value === "trimestre") return { desde: sumarDias(hoy, -89), hasta: hoy };
+  return { desde: inicioMesISO(), hasta: hoy };
 }
 
 async function cargar() {
   cargando.value = true;
   try {
-    const hoyISO = new Date().toISOString().slice(0, 10);
-    const manana = new Date(); manana.setDate(manana.getDate() + 1);
+    const hoy = hoyISO();
     const [resumen, agenda, recs] = await Promise.all([
       dashboardApi.resumen(rango()),
-      citasApi.listar({ desde: hoyISO, hasta: manana.toISOString().slice(0, 10), pageSize: 12 }),
+      citasApi.listar({ desde: hoy, hasta: sumarDias(hoy, 1), pageSize: 12 }),
       dashboardApi.recordatorios(7),
     ]);
     d.value = resumen.data ?? {};
     citasHoy.value = agenda.data ?? [];
     recordatorios.value = recs.data ?? [];
+  } catch (e) {
+    notify.toast(`No se pudo cargar el tablero: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }
 }
 
-/**
- * El panel se carga eager, así que sweetalert2 no puede entrar en su bundle:
- * son 85 kB en el arranque de todos los días por un aviso que casi nunca se
- * muestra. Se importa recién cuando hace falta avisar algo.
- */
-async function avisar(tipo, titulo, detalle) {
-  const { notify } = await import("../../../shared/composables/useNotify.js");
+/** sweetalert2 ya va en el bundle base (lo usan todos los diálogos). */
+function avisar(tipo, titulo, detalle) {
   notify[tipo](titulo, detalle);
 }
 
@@ -452,7 +443,7 @@ onMounted(cargar);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .alerta-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
-.alerta-card .n { font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.alerta-card .n { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.1; }
 .alerta-card .l { font-size: 11.5px; color: var(--ink-3); }
 .alerta-card .chev { margin-left: auto; color: var(--ink-4); }
 .alerta-card.danger { border-left: 3px solid var(--red);   color: var(--red-ink); }
@@ -486,14 +477,14 @@ onMounted(cargar);
   gap: 1px; background: var(--line-soft); padding: 0;
 }
 .clinico-item { background: var(--bg-elev); padding: 16px 14px; text-align: center; }
-.clinico-item .n { font-size: 22px; font-weight: 700; color: var(--ink); letter-spacing: -0.02em; }
+.clinico-item .n { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
 .clinico-item .l { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
 
 .especies { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; }
 .especie-row { display: grid; grid-template-columns: 90px 1fr 34px; align-items: center; gap: 10px; }
 .especie-row .nom { font-size: 12.5px; color: var(--ink-2); }
 .especie-row .barra { height: 7px; border-radius: 999px; background: var(--bg-soft); overflow: hidden; }
-.especie-row .fill { height: 100%; border-radius: 999px; background: var(--emerald); }
+.especie-row .fill { height: 100%; border-radius: 999px; background: var(--serie-1); }
 .especie-row .n { font-size: 12px; color: var(--ink-3); text-align: right; }
 
 .btn.mini { height: 24px; padding: 0 8px; font-size: 11px; }

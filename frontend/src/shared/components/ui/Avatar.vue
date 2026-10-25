@@ -26,14 +26,14 @@ const boxStyle = computed(() => {
   const bg = props.customColor
     ? props.customColor
     : props.gradient === "peach-amber"
-      ? "linear-gradient(135deg, #FCD9B6, #F59E0B)"
-      : "linear-gradient(135deg, #E8E5DD, #D4D0C5)";
+      ? "var(--emerald-soft-2)"
+      : "var(--bg-soft)";
   return {
     width: props.size + "px",
     height: props.size + "px",
     borderRadius: "999px",
     background: bg,
-    color: "white",
+    color: props.customColor ? "white" : "var(--emerald-ink)",
     display: "grid",
     placeItems: "center",
     fontWeight: 600,

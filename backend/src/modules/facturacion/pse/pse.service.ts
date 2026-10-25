@@ -282,6 +282,11 @@ export class PseService {
     }
 
     const payload = this.construirPayload(data, emisor);
+
+    // Reserva: solo una petición envía este número a la vez, y mientras se
+    // envía nadie lo anula. Si otra pestaña ya lo está enviando, el SP responde
+    // 409 y aquí no se llega a hablar con el proveedor.
+    await this.sp.callCtx("app.sp_comprobante_reservar_envio", ctx, [comprobanteId]);
     const inicio = Date.now();
 
     try {
@@ -329,6 +334,10 @@ export class PseService {
         request_id: res.requestId,
       };
     } catch (e: any) {
+      // La reserva se suelta para poder reintentar sin esperar a que caduque.
+      await this.sp
+        .callCtx("app.sp_comprobante_liberar_envio", ctx, [comprobanteId])
+        .catch(() => undefined);
       // El intento fallido también se registra: sin eso, un rechazo del
       // proveedor no deja rastro en ningún lado.
       await this.sp
@@ -392,6 +401,11 @@ export class PseService {
       );
     }
 
+    // Antes de pedirle nada a SUNAT: ¿procede la baja? (plazo de 7 días, sin
+    // cobros vivos, sin nota de crédito). Si no, SUNAT aceptaría una baja que
+    // el ERP luego no podría reflejar.
+    await this.sp.callCtx("app.sp_comprobante_registrar_baja", ctx, [comprobanteId, motivo, true]);
+
     const { cred } = await this.credenciales(ctx, c.empresa_id);
     const adapter = this.adapter();
     if (!adapter.comunicarBaja) {
@@ -414,10 +428,9 @@ export class PseService {
     ]);
 
     if (res.aceptado) {
-      await this.sp.callCtx("app.sp_comprobante_anular", ctx, [
-        comprobanteId,
-        `Comunicación de baja aceptada por SUNAT: ${motivo}`,
-      ]);
+      // sp_comprobante_anular rechaza lo enviado a SUNAT (con razón): la baja
+      // aceptada tiene su propia puerta.
+      await this.sp.callCtx("app.sp_comprobante_registrar_baja", ctx, [comprobanteId, motivo, false]);
     }
 
     return { aceptado: res.aceptado, codigo: res.codigo ?? null, mensaje: res.mensaje ?? null };

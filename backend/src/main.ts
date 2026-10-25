@@ -35,8 +35,12 @@ async function bootstrap() {
       // atacante quisiera. Ahora se declara cuántos proxies hay delante:
       // TRUST_PROXY=1 detrás del nginx del despliegue, vacío si no hay ninguno.
       trustProxy: resolverTrustProxy(process.env.TRUST_PROXY),
-      // Radiografías y ecografías pesan: 50 MB cubre el caso real.
-      bodyLimit: 50 * 1024 * 1024,
+      // Límite de cuerpo para JSON y formularios: 1 MB sobra para cualquier
+      // formulario del ERP. Antes eran 50 MB para todas las rutas, y cualquiera
+      // podía obligar al proceso a leer y parsear 50 MB de JSON por petición.
+      // Los archivos no pasan por aquí: multipart tiene su propio límite
+      // (abajo) y solo lo acepta POST /api/archivos.
+      bodyLimit: 1024 * 1024,
     }),
     // bodyParser: false → registramos nosotros el parser JSON más abajo. El de
     // Nest no admite cuerpo vacío y no se puede reemplazar una vez montado.
@@ -106,8 +110,10 @@ async function bootstrap() {
   await app.register(fastifyCookie as any, {
     secret: config.get<string>("COOKIE_SECRET"),
   });
+  // Radiografías y ecografías pesan: 50 MB por archivo cubre el caso real. Un
+  // archivo por petición y pocos campos: el formulario de subida no tiene más.
   await app.register(fastifyMultipart as any, {
-    limits: { fileSize: 50 * 1024 * 1024 },
+    limits: { fileSize: 50 * 1024 * 1024, files: 1, fields: 10, fieldSize: 64 * 1024, parts: 12 },
   });
   await app.register(fastifyCors as any, {
     origin: (config.get<string>("CORS_ORIGINS") ?? "")

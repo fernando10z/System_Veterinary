@@ -39,8 +39,13 @@ else
 fi
 
 paso "Cita"
-CUANDO=$(date -d '+90 minutes' +%FT%H:%M:00)
-R=$(post /citas "{\"mascota_id\":\"$MAS\",\"veterinario_id\":\"$VET\",\"fecha_hora\":\"$CUANDO\",\"motivo\":\"  control   POST-operatorio \",\"servicio_id\":\"$SRV\"}")
+# La agenda rechaza el solapamiento, así que al repetir el flujo el mismo
+# horario ya está tomado: se busca el primer hueco libre de media hora.
+for SALTO in $(seq 90 30 1500); do
+  CUANDO=$(date -d "+$SALTO minutes" +%FT%H:%M:00)
+  R=$(post /citas "{\"mascota_id\":\"$MAS\",\"veterinario_id\":\"$VET\",\"fecha_hora\":\"$CUANDO\",\"motivo\":\"  control   POST-operatorio \",\"servicio_id\":\"$SRV\"}")
+  [[ "$R" == *'"CONFLICT"'* ]] || break
+done
 CITA=$(echo "$R" | campo "d['id']"); echo "cita=$CITA  ${R:0:120}"
 
 paso "Consulta"

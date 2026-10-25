@@ -227,12 +227,12 @@
           <h2><span class="head-icon"><Calculator :size="14" /></span> Margen aproximado</h2>
         </header>
         <div class="module-panel-body margen">
-          <div><span>Ingresos facturados</span><span class="mono">{{ fmtSoles(ejecutivo.margen?.ingresos) }}</span></div>
-          <div><span>Costo de insumos consumidos</span><span class="mono">− {{ fmtSoles(ejecutivo.margen?.costo_insumos) }}</span></div>
-          <div><span>Compras del periodo</span><span class="mono">{{ fmtSoles(ejecutivo.margen?.compras) }}</span></div>
+          <div><span>Ingresos facturados</span><span class="cifra">{{ fmtSoles(ejecutivo.margen?.ingresos) }}</span></div>
+          <div><span>Costo de insumos consumidos</span><span class="cifra">− {{ fmtSoles(ejecutivo.margen?.costo_insumos) }}</span></div>
+          <div><span>Compras del periodo</span><span class="cifra">{{ fmtSoles(ejecutivo.margen?.compras) }}</span></div>
           <div class="total">
             <span>Margen bruto estimado</span>
-            <span class="mono">{{ fmtSoles(margenBruto) }}</span>
+            <span class="cifra">{{ fmtSoles(margenBruto) }}</span>
           </div>
         </div>
       </section>
@@ -252,6 +252,8 @@ import TablaReporte from "../components/TablaReporte.vue";
 import { reportesApi } from "../api/reportes.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtSoles, fmtDate } from "../../../shared/components/ui/format.js";
+import { hoyISO, inicioMesISO } from "@/shared/utils/fechas.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const { hasPermission } = useAuth();
 const puedeEjecutivo = computed(() => hasPermission("reportes:ejecutivo"));
@@ -263,10 +265,8 @@ const clinico = ref({});
 const inventario = ref({});
 const ejecutivo = ref({});
 
-const hoy = new Date();
-const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-const desde = ref(inicioMes.toISOString().slice(0, 10));
-const hasta = ref(hoy.toISOString().slice(0, 10));
+const desde = ref(inicioMesISO());
+const hasta = ref(hoyISO());
 
 const margenBruto = computed(() => {
   const m = ejecutivo.value.margen ?? {};
@@ -281,6 +281,8 @@ async function cargar() {
     else if (tab.value === "clinico") clinico.value = (await reportesApi.clinico(params)).data ?? {};
     else if (tab.value === "inventario") inventario.value = (await reportesApi.inventario(params)).data ?? {};
     else ejecutivo.value = (await reportesApi.ejecutivo(params)).data ?? {};
+  } catch (e) {
+    notify.toast(`No se pudo cargar el reporte: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

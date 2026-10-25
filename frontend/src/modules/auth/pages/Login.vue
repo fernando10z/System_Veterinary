@@ -161,7 +161,9 @@ async function handleSubmit() {
     bannerError.value = r.error || "No pudimos iniciar sesión";
     return;
   }
-  router.replace(route.query.from ? String(route.query.from) : "/dashboard");
+  // Solo rutas internas: un ?from=//otro-dominio no debe sacar al usuario del ERP.
+  const from = route.query.from ? String(route.query.from) : "";
+  router.replace(from.startsWith("/") && !from.startsWith("//") ? from : "/dashboard");
 }
 </script>
 

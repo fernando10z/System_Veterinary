@@ -12,12 +12,12 @@ import Swal from "sweetalert2";
  */
 
 const baseColors = {
-  confirmEmerald: "#07B162",
-  confirmDeep: "#058F4F",
-  cancel: "#9AA29F",
-  danger: "#DC4040",
-  warn: "#E89A1F",
-  info: "#2D7EE5",
+  confirmEmerald: "#0E5C4E",
+  confirmDeep: "#0C4A40",
+  cancel: "#8EA299",
+  danger: "#C8463D",
+  warn: "#E3A63B",
+  info: "#2F6FB0",
 };
 
 function basePopupClass() {

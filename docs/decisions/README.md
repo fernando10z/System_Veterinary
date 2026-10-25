@@ -12,3 +12,4 @@ decisión y sus consecuencias.
 | [005](005-facturacion-electronica.md) | La facturación electrónica entra por un adaptador |
 | [006](006-permisos-en-el-stored-procedure.md) | El permiso se comprueba dentro del stored procedure |
 | [007](007-sedes-peluqueria-planes.md) | Sedes, peluquería y planes: dónde se coloca cada uno |
+| [008](008-integridad-del-dinero.md) | El dinero y el stock no dependen de que nadie pulse a la vez |

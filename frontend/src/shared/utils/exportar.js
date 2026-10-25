@@ -1,3 +1,4 @@
+import { parseFecha } from "./fechas.js";
 // Exportación de tablas a Excel, sin dependencias externas.
 //
 // Genera un CSV UTF-8 con BOM y separador ";" — que es lo que espera Excel en
@@ -20,8 +21,9 @@ function celdaTexto(valor, tipo) {
     return n.toFixed(2).replace(".", ",");
   }
   if (tipo === "fecha") {
-    const d = new Date(valor);
-    if (Number.isNaN(d.getTime())) return String(valor);
+    // Un DATE "YYYY-MM-DD" se toma en hora local (en UTC retrocede un día).
+    const d = parseFecha(valor);
+    if (!d) return String(valor);
     return d.toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" });
   }
   return String(valor);

@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal modal-wide" @click.stop>
       <div class="m-head"><h3>{{ esEdicion ? "Editar producto" : "Nuevo producto" }}</h3></div>
 
@@ -10,12 +10,12 @@
 
         <div class="form-grid">
           <div class="field" style="grid-column: 1 / -1">
-            <label>Nombre <span class="req">*</span></label>
-            <input v-model.trim="form.nombre" type="text" placeholder="Amoxicilina 500 mg" />
+            <label for="productomo-nombre">Nombre <span class="req">*</span></label>
+            <input id="productomo-nombre" v-model.trim="form.nombre" type="text" placeholder="Amoxicilina 500 mg" />
           </div>
           <div class="field">
-            <label>Tipo</label>
-            <select v-model="form.tipo">
+            <label for="productomo-tipo">Tipo</label>
+            <select id="productomo-tipo" v-model="form.tipo">
               <option value="medicamento">Medicamento</option>
               <option value="insumo">Insumo</option>
               <option value="vacuna">Vacuna</option>
@@ -25,54 +25,54 @@
             </select>
           </div>
           <div class="field">
-            <label>Categoría</label>
-            <select v-model="form.categoria_id">
+            <label for="productomo-categoria-id">Categoría</label>
+            <select id="productomo-categoria-id" v-model="form.categoria_id">
               <option value="">Sin categoría</option>
               <option v-for="c in categorias" :key="c.id" :value="c.id">{{ c.nombre }}</option>
             </select>
           </div>
           <div class="field">
-            <label>Presentación</label>
-            <input v-model.trim="form.presentacion" type="text" placeholder="Caja x 20 tabletas" />
+            <label for="productomo-presentacion">Presentación</label>
+            <input id="productomo-presentacion" v-model.trim="form.presentacion" type="text" placeholder="Caja x 20 tabletas" />
           </div>
           <div class="field">
-            <label>Unidad de medida</label>
-            <input v-model.trim="form.unidad_medida" type="text" placeholder="UND" />
+            <label for="productomo-unidad-medida">Unidad de medida</label>
+            <input id="productomo-unidad-medida" v-model.trim="form.unidad_medida" type="text" placeholder="UND" />
           </div>
           <div class="field">
-            <label>Principio activo</label>
-            <input v-model.trim="form.principio_activo" type="text" />
+            <label for="productomo-principio-activo">Principio activo</label>
+            <input id="productomo-principio-activo" v-model.trim="form.principio_activo" type="text" />
           </div>
           <div class="field">
-            <label>Laboratorio</label>
-            <input v-model.trim="form.laboratorio" type="text" />
+            <label for="productomo-laboratorio">Laboratorio</label>
+            <input id="productomo-laboratorio" v-model.trim="form.laboratorio" type="text" />
           </div>
           <div class="field">
-            <label>Precio de compra (S/)</label>
-            <input v-model.number="form.precio_compra" type="number" min="0" step="0.01" />
+            <label for="productomo-precio-compra">Precio de compra (S/)</label>
+            <input id="productomo-precio-compra" v-model.number="form.precio_compra" type="number" min="0" step="0.01" />
           </div>
           <div class="field">
-            <label>Precio de venta (S/) <span class="req">*</span></label>
-            <input v-model.number="form.precio_venta" type="number" min="0" step="0.01" />
+            <label for="productomo-precio-venta">Precio de venta (S/) <span class="req">*</span></label>
+            <input id="productomo-precio-venta" v-model.number="form.precio_venta" type="number" min="0" step="0.01" />
             <small v-if="margen !== null" class="muted">Margen: {{ margen }}%</small>
           </div>
           <div class="field">
-            <label>Stock mínimo</label>
-            <input v-model.number="form.stock_minimo" type="number" min="0" />
+            <label for="productomo-stock-minimo">Stock mínimo</label>
+            <input id="productomo-stock-minimo" v-model.number="form.stock_minimo" type="number" min="0" />
             <small class="muted">Dispara la alerta de stock crítico.</small>
           </div>
           <div class="field">
-            <label>Stock máximo</label>
-            <input v-model.number="form.stock_maximo" type="number" min="0" />
+            <label for="productomo-stock-maximo">Stock máximo</label>
+            <input id="productomo-stock-maximo" v-model.number="form.stock_maximo" type="number" min="0" />
           </div>
           <div v-if="!esEdicion" class="field">
-            <label>Stock inicial</label>
-            <input v-model.number="form.stock_inicial" type="number" min="0" />
+            <label for="productomo-stock-inicial">Stock inicial</label>
+            <input id="productomo-stock-inicial" v-model.number="form.stock_inicial" type="number" min="0" />
             <small class="muted">Se registra como entrada en el kardex.</small>
           </div>
           <div class="field" style="grid-column: 1 / -1">
-            <label>Descripción</label>
-            <textarea v-model="form.descripcion" rows="2"></textarea>
+            <label for="productomo-descripcion">Descripción</label>
+            <textarea id="productomo-descripcion" v-model="form.descripcion" rows="2"></textarea>
           </div>
         </div>
 

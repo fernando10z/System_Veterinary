@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal modal-xwide" @click.stop>
       <div class="m-head"><h3>Emitir comprobante</h3></div>
 
@@ -10,41 +10,48 @@
 
         <!-- Cliente -->
         <div class="field">
-          <label>Cliente <span class="req">*</span></label>
+          <label for="emitircomp-q">Cliente <span class="req">*</span></label>
           <div v-if="clienteSel" class="sel-cliente">
             <div class="avatar-sm">{{ iniciales(clienteSel.nombre_completo) }}</div>
             <div class="grow">
               <strong>{{ clienteSel.nombre_completo }}</strong>
-              <small class="mono">{{ clienteSel.numero_documento }}</small>
+              <small class="codigo">{{ clienteSel.numero_documento }}</small>
             </div>
-            <button class="btn mini" @click="limpiarCliente">Cambiar</button>
+            <button v-if="!bloquearCliente" class="btn mini" @click="limpiarCliente">Cambiar</button>
           </div>
           <template v-else>
-            <div class="fil grow">
+            <div class="fil grow" data-no-dirty>
               <Search :size="14" />
-              <input v-model="q" type="search" placeholder="Buscar cliente por nombre, documento o mascota…" @input="buscarDebounced" />
+              <input id="emitircomp-q"
+                v-model="q" type="search" aria-label="Buscar cliente"
+                placeholder="Buscar cliente por nombre, documento o mascota…" @input="buscarDebounced"
+              />
+              <Loader2 v-if="buscando" :size="14" class="spin" />
             </div>
+            <small v-if="q.length >= 2 && !buscando && buscado && !resultados.length" class="muted">
+              Sin coincidencias para “{{ q }}”.
+            </small>
             <div v-if="resultados.length" class="resultados">
               <button v-for="c in resultados" :key="c.id" class="res-item" @click="elegir(c)">
                 <strong>{{ c.nombre_completo }}</strong>
-                <span class="mono muted">{{ c.numero_documento }}</span>
+                <span class="codigo muted">{{ c.numero_documento }}</span>
               </button>
             </div>
           </template>
         </div>
 
-        <div v-if="clienteSel" class="form-grid">
+        <div v-if="clienteSel" class="form-grid" style="margin-top: 14px">
           <div class="field">
-            <label>Tipo de comprobante</label>
-            <select v-model="form.tipo">
+            <label for="emit-tipo">Tipo de comprobante</label>
+            <select id="emit-tipo" v-model="form.tipo">
               <option value="boleta">Boleta</option>
               <option value="factura" :disabled="!esRuc">Factura {{ esRuc ? "" : "(requiere RUC)" }}</option>
               <option value="nota_venta">Nota de venta</option>
             </select>
           </div>
           <div class="field">
-            <label>Fecha de emisión</label>
-            <input v-model="form.fecha_emision" type="date" />
+            <label for="emit-fecha">Fecha de emisión</label>
+            <input id="emit-fecha" v-model="form.fecha_emision" type="date" :max="hoy" />
           </div>
         </div>
 
@@ -71,32 +78,46 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(l, i) in lineas" :key="i">
-                  <td><input v-model="l.incluir" type="checkbox" /></td>
+                <tr v-for="(l, i) in lineas" :key="i" :class="{ otra: mascota && l.mascota && l.mascota !== mascota }">
+                  <td><input v-model="l.incluir" type="checkbox" :aria-label="`Incluir ${l.descripcion}`" /></td>
                   <td>
                     <strong>{{ l.descripcion }}</strong>
-                    <br /><small class="muted mono">{{ l.codigo }}</small>
+                    <br /><small class="muted codigo">{{ l.codigo }}</small>
+                    <small v-if="l.mascota && lineasDeVariasMascotas" class="muted"> · {{ l.mascota }}</small>
                   </td>
                   <td><span class="tag">{{ l.tipo === "servicio" ? "Servicio" : "Producto" }}</span></td>
-                  <td class="num mono">{{ l.cantidad }}</td>
-                  <td class="num mono">{{ fmtSoles(l.precio_unitario) }}</td>
-                  <td class="num mono">{{ fmtSoles(l.total) }}</td>
+                  <td class="num cifra">{{ l.cantidad }}</td>
+                  <td class="num cifra">{{ fmtSoles(l.precio_unitario) }}</td>
+                  <td class="num cifra">{{ fmtSoles(l.total) }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
           <div v-if="lineas.length" class="totales">
-            <div><span>Seleccionado</span><span class="mono">{{ seleccionadas.length }} de {{ lineas.length }}</span></div>
-            <div class="total"><span>Total a cobrar</span><span class="mono">{{ fmtSoles(totalSeleccionado) }}</span></div>
+            <div><span>Seleccionado</span><span class="cifra">{{ seleccionadas.length }} de {{ lineas.length }}</span></div>
+            <div class="total"><span>Total a cobrar</span><span class="cifra">{{ fmtSoles(totalSeleccionado) }}</span></div>
           </div>
         </template>
       </div>
 
       <div class="m-foot modal-actions">
-        <button class="btn" @click="$emit('close')">Cancelar</button>
-        <button class="btn primary" :disabled="guardando || !seleccionadas.length" @click="emitir">
-          {{ guardando ? "Emitiendo…" : "Emitir comprobante" }}
+        <button class="btn" :disabled="guardando" @click="$emit('close')">Cancelar</button>
+        <button
+          v-if="!soloCobrar"
+          :class="['btn', puedeCobrar ? '' : 'primary']"
+          :disabled="guardando || !seleccionadas.length"
+          @click="emitir(false)"
+        >
+          {{ guardando && !cobrarTras ? "Emitiendo…" : "Emitir comprobante" }}
+        </button>
+        <button
+          v-if="puedeCobrar"
+          class="btn primary"
+          :disabled="guardando || !seleccionadas.length"
+          @click="emitir(true)"
+        >
+          <Wallet :size="14" /> {{ guardando && cobrarTras ? "Emitiendo…" : `Emitir y cobrar ${fmtSoles(totalSeleccionado)}` }}
         </button>
       </div>
     </div>
@@ -104,36 +125,85 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed } from "vue";
-import { AlertCircle, Search, Loader2, Info } from "lucide-vue-next";
+import { reactive, ref, computed, onMounted } from "vue";
+import { AlertCircle, Search, Loader2, Info, Wallet } from "lucide-vue-next";
 import { facturacionApi } from "../api/facturacion.api.js";
 import { clientesApi } from "../../clientes/api/clientes.api.js";
 import { clinicoApi } from "../../clinico/api/clinico.api.js";
 import { fmtSoles, iniciales } from "../../../shared/components/ui/format.js";
+import { useAuth } from "../../../shared/composables/useAuth.js";
+import { notify } from "../../../shared/composables/useNotify.js";
+import { hoyISO } from "@/shared/utils/fechas.js";
+import { uuid } from "@/shared/utils/uuid.js";
 
+/**
+ * Emisión desde lo pendiente de facturar del cliente. Se puede abrir ya con el
+ * cliente elegido (desde la consulta, la cita o la sala de espera): así la
+ * recepción pasa de "atendido" a "boleta + cobro" en dos clics.
+ */
+const props = defineProps({
+  /** { id, nombre_completo?, numero_documento? }: cliente ya elegido. */
+  cliente: { type: Object, default: null },
+  /** Nombre de la mascota atendida: resalta sus líneas y se envía como contexto. */
+  mascota: { type: String, default: "" },
+  mascotaId: { type: String, default: "" },
+  consultaId: { type: String, default: "" },
+  citaId: { type: String, default: "" },
+  /** Solo muestra "Emitir y cobrar" (flujo rápido desde la atención). */
+  soloCobrar: { type: Boolean, default: false },
+});
 const emit = defineEmits(["close", "emitido"]);
+
+const { hasPermission } = useAuth();
+const puedeCobrar = computed(() => hasPermission("pagos:registrar"));
+const bloquearCliente = computed(() => !!props.cliente?.id);
 
 const q = ref("");
 const resultados = ref([]);
+const buscando = ref(false);
+const buscado = ref(false);
 const clienteSel = ref(null);
 const lineas = ref([]);
 const cargandoPend = ref(false);
 const guardando = ref(false);
+const cobrarTras = ref(false);
 const error = ref("");
+const hoy = hoyISO();
 
-const form = reactive({ tipo: "boleta", fecha_emision: new Date().toISOString().slice(0, 10) });
+const form = reactive({ tipo: "boleta", fecha_emision: hoy });
 
-const esRuc = computed(() => clienteSel.value?.numero_documento?.length === 11);
+// Una sola clave por apertura del modal: un doble clic o un reintento tras un
+// corte no emite dos comprobantes.
+const idempotencyKey = uuid();
+
+// La factura exige RUC: se decide por el tipo de documento, no por el largo.
+const esRuc = computed(() => {
+  const c = clienteSel.value;
+  if (!c) return false;
+  if (c.tipo_documento) return c.tipo_documento === "RUC";
+  return /^(10|15|17|20)\d{9}$/.test(c.numero_documento || "");
+});
 const seleccionadas = computed(() => lineas.value.filter((l) => l.incluir));
 const totalSeleccionado = computed(() => seleccionadas.value.reduce((s, l) => s + Number(l.total), 0));
+const lineasDeVariasMascotas = computed(() => new Set(lineas.value.map((l) => l.mascota).filter(Boolean)).size > 1);
 
 let timer = null;
 function buscarDebounced() {
   clearTimeout(timer);
+  buscado.value = false;
   if (q.value.length < 2) { resultados.value = []; return; }
   timer = setTimeout(async () => {
-    const r = await clientesApi.buscar(q.value, 8);
-    resultados.value = r.data ?? [];
+    buscando.value = true;
+    try {
+      const r = await clientesApi.buscar(q.value, 8);
+      resultados.value = r.data ?? [];
+    } catch (e) {
+      resultados.value = [];
+      notify.toast(`No se pudo buscar: ${e.message}`, "error");
+    } finally {
+      buscando.value = false;
+      buscado.value = true;
+    }
   }, 300);
 }
 
@@ -143,24 +213,47 @@ function limpiarCliente() {
 }
 
 async function elegir(c) {
-  clienteSel.value = c;
+  clienteSel.value = { ...c };
   resultados.value = [];
   q.value = "";
-  // Una factura exige RUC; si el cliente no lo tiene, boleta por defecto.
-  if (c.numero_documento?.length !== 11) form.tipo = "boleta";
-
   cargandoPend.value = true;
   try {
-    const r = await clinicoApi.pendienteFacturar(c.id);
-    const d = r.data ?? {};
+    // La búsqueda no trae el tipo de documento: se lee la ficha para decidir
+    // si puede recibir factura.
+    const [ficha, pend] = await Promise.all([
+      clientesApi.obtener(c.id).catch(() => null),
+      clinicoApi.pendienteFacturar(c.id),
+    ]);
+    if (ficha?.data) {
+      const d = ficha.data;
+      clienteSel.value = {
+        ...clienteSel.value,
+        tipo_documento: d.tipo_documento,
+        numero_documento: d.numero_documento ?? clienteSel.value.numero_documento,
+        nombre_completo: clienteSel.value.nombre_completo
+          || d.nombre_completo
+          || [d.nombres, d.apellido_paterno, d.apellido_materno].filter(Boolean).join(" "),
+      };
+    }
+    // Una factura exige RUC; si el cliente no lo tiene, boleta por defecto.
+    form.tipo = esRuc.value ? "factura" : "boleta";
+    const d = pend.data ?? {};
     lineas.value = [...(d.servicios ?? []), ...(d.insumos ?? [])].map((l) => ({ ...l, incluir: true }));
+  } catch (e) {
+    error.value = `No se pudo cargar lo pendiente de facturar: ${e.message}`;
   } finally {
     cargandoPend.value = false;
   }
 }
 
-async function emitir() {
+async function emitir(cobrar = false) {
+  if (guardando.value) return;
   error.value = "";
+  if (form.tipo === "factura" && !esRuc.value) {
+    error.value = "La factura requiere un cliente con RUC. Emite una boleta.";
+    return;
+  }
+  cobrarTras.value = cobrar;
   guardando.value = true;
   try {
     // Se mandan las líneas explícitas: así el usuario decide qué cobra ahora.
@@ -183,14 +276,27 @@ async function emitir() {
       tipo: form.tipo,
       fecha_emision: form.fecha_emision,
       items,
+      ...(props.mascotaId ? { mascota_id: props.mascotaId } : {}),
+      ...(props.consultaId ? { consulta_id: props.consultaId } : {}),
+      ...(props.citaId ? { cita_id: props.citaId } : {}),
+      idempotency_key: idempotencyKey,
     });
-    emit("emitido", r.data);
+    emit("emitido", {
+      ...r.data,
+      cliente_id: clienteSel.value.id,
+      cliente: clienteSel.value.nombre_completo,
+      saldo_pendiente: r.data?.saldo_pendiente ?? r.data?.total,
+    }, { cobrar });
   } catch (e) {
     error.value = e.message;
   } finally {
     guardando.value = false;
   }
 }
+
+onMounted(() => {
+  if (props.cliente?.id) elegir(props.cliente);
+});
 </script>
 
 <style scoped>
@@ -214,4 +320,5 @@ async function emitir() {
 .totales .total { border-top: 1px solid var(--line); padding-top: 8px; font-size: 16px; font-weight: 700; color: var(--ink); }
 .req { color: var(--red); }
 .btn.mini { height: 26px; padding: 0 9px; font-size: 11.5px; }
+tr.otra { opacity: 0.75; }
 </style>

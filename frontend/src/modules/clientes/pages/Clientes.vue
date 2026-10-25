@@ -115,8 +115,8 @@
                   </div>
                 </div>
               </td>
-              <td class="mono">{{ c.tipo_documento }} {{ c.numero_documento }}</td>
-              <td class="mono">{{ c.telefono || "—" }}</td>
+              <td class="codigo">{{ c.tipo_documento }} {{ c.numero_documento }}</td>
+              <td class="codigo">{{ c.telefono || "—" }}</td>
               <td>
                 <div class="mascotas-chips">
                   <span v-for="m in c.mascotas.slice(0, 3)" :key="m.id" class="tag">{{ m.nombre }}</span>
@@ -130,7 +130,7 @@
                 </span>
                 <span v-else class="muted">Nunca</span>
               </td>
-              <td class="num mono">
+              <td class="num cifra">
                 <span :class="Number(c.deuda_pendiente) > 0 ? 'deuda' : 'muted'">
                   {{ fmtSoles(c.deuda_pendiente) }}
                 </span>
@@ -145,10 +145,10 @@
               </td>
               <td class="acciones-col" @click.stop>
                 <div class="row-actions">
-                  <button class="btn mini" title="Ver ficha" @click="$router.push(`/clientes/${c.id}`)">
+                  <button class="btn mini" title="Ver ficha" @click="$router.push(`/clientes/${c.id}`)" aria-label="Ver ficha">
                     <FileText :size="13" />
                   </button>
-                  <button v-if="puedeEditar" class="btn mini" title="Editar" @click="abrirEditar(c)">
+                  <button v-if="puedeEditar" class="btn mini" title="Editar" @click="abrirEditar(c)" aria-label="Editar">
                     <Pencil :size="13" />
                   </button>
                 </div>
@@ -178,6 +178,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from "vue";
+import { useRouter } from "vue-router";
 import {
   Users, PawPrint, Search, Plus, RefreshCw, Loader2, AlertCircle, Filter,
   FileText, Pencil, CreditCard, Globe,
@@ -185,11 +186,13 @@ import {
 import PageHeader from "../../../layouts/PageHeader.vue";
 import ClienteModal from "../components/ClienteModal.vue";
 import { clientesApi } from "../api/clientes.api.js";
+import { notify } from "../../../shared/composables/useNotify.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtSoles } from "../../../shared/components/ui/format.js";
 import { fmtFechaHora, fmtRelativo, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
 
 const { hasPermission } = useAuth();
+const router = useRouter();
 const puedeCrear = computed(() => hasPermission("clientes:crear"));
 const puedeEditar = computed(() => hasPermission("clientes:editar"));
 
@@ -221,7 +224,19 @@ function limpiar() { filtros.buscar = ""; filtros.estado = ""; recargar(); }
 
 function abrirNuevo() { editando.value = null; modal.value = true; }
 function abrirEditar(c) { editando.value = c; modal.value = true; }
-function onGuardado() { modal.value = false; cargar(); }
+/**
+ * Alta de propietario: se va directo a su ficha (y, si lo pidió, con el alta
+ * de la mascota abierta). En recepción el siguiente paso siempre es la mascota.
+ */
+function onGuardado(r = {}) {
+  modal.value = false;
+  if (r.nuevo && r.id) {
+    notify.toast("Propietario registrado");
+    router.push({ path: `/clientes/${r.id}`, query: r.agregarMascota ? { nuevaMascota: "1" } : {} });
+    return;
+  }
+  cargar();
+}
 
 async function cargar() {
   cargando.value = true;

@@ -56,9 +56,9 @@
             <tr v-for="p in pendientes" :key="p.id">
               <td><strong>{{ p.solicitante }}</strong></td>
               <td><span class="tag">{{ capitalizar(p.tipo) }}</span></td>
-              <td class="mono">{{ fmtDate(p.fecha_inicio) }}</td>
-              <td class="mono">{{ fmtDate(p.fecha_fin) }}</td>
-              <td class="num mono">{{ p.dias }}</td>
+              <td class="cifra">{{ fmtDate(p.fecha_inicio) }}</td>
+              <td class="cifra">{{ fmtDate(p.fecha_fin) }}</td>
+              <td class="num cifra">{{ p.dias }}</td>
               <td class="muted">{{ p.motivo || "—" }}</td>
               <td class="acciones-col">
                 <div class="row-actions">
@@ -110,7 +110,7 @@
                 {{ p.rol || "Sin rol" }}
                 <template v-if="p.especializacion"> · {{ p.especializacion }}</template>
               </small>
-              <small v-if="p.colegiatura" class="mono muted">{{ p.colegiatura }}</small>
+              <small v-if="p.colegiatura" class="codigo muted">{{ p.colegiatura }}</small>
             </div>
             <span :class="['estado-pill', p.estado === 'activo' ? 'ok' : 'neutral']">
               <span class="dot"></span>{{ capitalizar(p.estado) }}
@@ -166,11 +166,11 @@
           </thead>
           <tbody>
             <tr v-for="a in asistencia" :key="a.id">
-              <td class="mono">{{ fmtDate(a.fecha) }}</td>
+              <td class="cifra">{{ fmtDate(a.fecha) }}</td>
               <td>{{ a.profesional }}</td>
-              <td class="mono">{{ a.hora_entrada || "—" }}</td>
-              <td class="mono">{{ a.hora_salida || "—" }}</td>
-              <td class="num mono">{{ a.horas_trabajadas ?? "—" }}</td>
+              <td class="codigo">{{ a.hora_entrada || "—" }}</td>
+              <td class="codigo">{{ a.hora_salida || "—" }}</td>
+              <td class="num cifra">{{ a.horas_trabajadas ?? "—" }}</td>
               <td>
                 <span :class="['estado-pill', toneAsistencia(a.estado)]">
                   <span class="dot"></span>{{ capitalizar(a.estado) }}
@@ -195,6 +195,7 @@ import { rrhhApi } from "../api/rrhh.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtDate, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
 import { notify } from "../../../shared/composables/useNotify.js";
+import { hoyISO, inicioMesISO } from "@/shared/utils/fechas.js";
 
 const { hasPermission } = useAuth();
 const puedeAprobar = computed(() => hasPermission("rrhh:aprobar"));
@@ -205,10 +206,8 @@ const resumenAsistencia = ref({});
 const pendientes = ref([]);
 const cargando = ref(false);
 
-const hoy = new Date();
-const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-const desde = ref(inicioMes.toISOString().slice(0, 10));
-const hasta = ref(hoy.toISOString().slice(0, 10));
+const desde = ref(inicioMesISO());
+const hasta = ref(hoyISO());
 
 const veterinarios = computed(() => equipo.value.filter((p) => p.es_veterinario).length);
 const totalConsultas = computed(() => equipo.value.reduce((s, p) => s + Number(p.consultas), 0));
@@ -261,6 +260,8 @@ async function cargar() {
     asistencia.value = asis.data ?? [];
     resumenAsistencia.value = asis.meta ?? {};
     pendientes.value = per.data ?? [];
+  } catch (e) {
+    notify.toast(`No se pudo cargar el equipo: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

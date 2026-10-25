@@ -1,8 +1,8 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal modal-wide" @click.stop>
       <div class="m-head">
-        <h3>{{ cita?.mascota || "Cita" }} <span class="mono muted">{{ cita?.codigo }}</span></h3>
+        <h3>{{ cita?.mascota || "Cita" }} <span class="codigo muted">{{ cita?.codigo }}</span></h3>
       </div>
 
       <div v-if="cargando" class="m-body">
@@ -56,7 +56,7 @@
           </div>
           <div class="detalle-item">
             <div class="k">Contacto</div>
-            <div class="v mono">{{ cita.cliente_telefono || "—" }}</div>
+            <div class="v codigo">{{ cita.cliente_telefono || "—" }}</div>
           </div>
           <div class="detalle-item">
             <div class="k">Veterinario</div>
@@ -113,6 +113,14 @@
         </button>
 
         <button
+          v-if="cita && puedeCobrar && ['en_atencion', 'completada'].includes(cita.estado)"
+          class="btn"
+          @click="$emit('cobrar', cita)"
+        >
+          <Wallet :size="14" /> Cobrar
+        </button>
+
+        <button
           v-if="cita && siguiente"
           class="btn primary"
           @click="avanzar"
@@ -127,7 +135,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
-import { Loader2, AlertCircle, AlertTriangle, Stethoscope } from "lucide-vue-next";
+import { Loader2, AlertCircle, AlertTriangle, Stethoscope, Wallet } from "lucide-vue-next";
 import { citasApi } from "../api/citas.api.js";
 import { clinicoApi } from "../../clinico/api/clinico.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
@@ -135,11 +143,12 @@ import { fmtFechaHora, capitalizar } from "../../../shared/components/ui/format.
 import { notify } from "../../../shared/composables/useNotify.js";
 
 const props = defineProps({ citaId: { type: String, required: true } });
-const emit = defineEmits(["close", "cambiado"]);
+const emit = defineEmits(["close", "cambiado", "cobrar"]);
 
 const router = useRouter();
 const { hasPermission } = useAuth();
 const puedeAtender = computed(() => hasPermission("clinico:registrar"));
+const puedeCobrar = computed(() => hasPermission("facturacion:emitir"));
 
 const cita = ref(null);
 const cargando = ref(true);

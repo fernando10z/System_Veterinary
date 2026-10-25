@@ -21,17 +21,17 @@
 
         <form class="form-grid" style="grid-template-columns: 1fr" @submit.prevent="guardar">
           <div class="field">
-            <label>Contraseña actual</label>
-            <input v-model="actual" type="password" autocomplete="current-password" />
+            <label for="cambiarpas-actual">Contraseña actual</label>
+            <input id="cambiarpas-actual" v-model="actual" type="password" autocomplete="current-password" />
           </div>
           <div class="field">
-            <label>Contraseña nueva</label>
-            <input v-model="nueva" type="password" autocomplete="new-password" />
+            <label for="cambiarpas-nueva">Contraseña nueva</label>
+            <input id="cambiarpas-nueva" v-model="nueva" type="password" autocomplete="new-password" />
             <small class="muted">Mínimo 8 caracteres.</small>
           </div>
           <div class="field">
-            <label>Repetir contraseña nueva</label>
-            <input v-model="repetir" type="password" autocomplete="new-password" />
+            <label for="cambiarpas-repetir">Repetir contraseña nueva</label>
+            <input id="cambiarpas-repetir" v-model="repetir" type="password" autocomplete="new-password" />
           </div>
           <div>
             <button class="btn primary" :disabled="guardando">
@@ -49,6 +49,8 @@ import { ref } from "vue";
 import { KeyRound, AlertCircle, CheckCircle2 } from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import { authApi } from "../api/auth.api.js";
+import { auth } from "../../../shared/api/client.js";
+import { USER_KEY } from "../../../shared/config/api.config.js";
 
 const actual = ref("");
 const nueva = ref("");
@@ -72,7 +74,16 @@ async function guardar() {
 
   guardando.value = true;
   try {
-    await authApi.cambiarPassword(actual.value, nueva.value);
+    const r = await authApi.cambiarPassword(actual.value, nueva.value);
+    // Cambiar la clave cierra todas las sesiones, incluida esta: el backend
+    // entrega un par nuevo y hay que guardarlo, o el siguiente refresh expulsa
+    // al usuario. La clave temporal ya quedó estrenada.
+    const d = r?.data ?? r;
+    auth.setTokens(d?.access_token, d?.refresh_token);
+    try {
+      const u = JSON.parse(localStorage.getItem(USER_KEY) || "null");
+      if (u) localStorage.setItem(USER_KEY, JSON.stringify({ ...u, must_change_password: false }));
+    } catch { /* sin almacenamiento: el perfil se recarga al volver a entrar */ }
     ok.value = true;
     actual.value = nueva.value = repetir.value = "";
   } catch (e) {

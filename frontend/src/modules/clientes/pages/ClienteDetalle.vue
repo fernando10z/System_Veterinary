@@ -119,7 +119,7 @@
                 </thead>
                 <tbody>
                   <tr v-for="ci in c.ultimas_citas" :key="ci.id">
-                    <td class="mono">{{ fmtFechaHora(ci.fecha_hora) }}</td>
+                    <td class="cifra">{{ fmtFechaHora(ci.fecha_hora) }}</td>
                     <td><strong>{{ ci.mascota }}</strong></td>
                     <td>{{ ci.servicio || "—" }}</td>
                     <td class="muted">{{ ci.motivo || "—" }}</td>
@@ -143,9 +143,9 @@
             </header>
             <div class="module-panel-body">
               <div class="detalle-grid">
-                <div class="detalle-item"><div class="k">Documento</div><div class="v mono">{{ c.tipo_documento }} {{ c.numero_documento }}</div></div>
-                <div class="detalle-item"><div class="k">Teléfono</div><div class="v mono">{{ c.telefono || "—" }}</div></div>
-                <div class="detalle-item"><div class="k">Alterno</div><div class="v mono">{{ c.telefono_alterno || "—" }}</div></div>
+                <div class="detalle-item"><div class="k">Documento</div><div class="v codigo">{{ c.tipo_documento }} {{ c.numero_documento }}</div></div>
+                <div class="detalle-item"><div class="k">Teléfono</div><div class="v codigo">{{ c.telefono || "—" }}</div></div>
+                <div class="detalle-item"><div class="k">Alterno</div><div class="v codigo">{{ c.telefono_alterno || "—" }}</div></div>
                 <div class="detalle-item"><div class="k">Correo</div><div class="v">{{ c.correo || "—" }}</div></div>
                 <div class="detalle-item" style="grid-column: 1 / -1"><div class="k">Dirección</div><div class="v">{{ c.direccion || "—" }}</div></div>
                 <div class="detalle-item"><div class="k">Portal</div>
@@ -207,7 +207,7 @@
       />
 
       <!-- Activar / reiniciar portal -->
-      <div v-if="modalPortal" class="modal-back" @click="modalPortal = false">
+      <div v-if="modalPortal" class="modal-back" v-dialogo="() => (modalPortal = false)">
         <div class="modal" @click.stop>
           <div class="m-head"><h3>{{ c.portal_acceso ? "Reiniciar acceso al portal" : "Activar portal" }}</h3></div>
           <div class="m-body">
@@ -216,12 +216,12 @@
             </div>
             <p class="muted" style="margin-top: 0">
               El propietario ingresará al portal con su documento
-              (<span class="mono">{{ c.numero_documento }}</span>) o su correo y la contraseña
+              (<span class="codigo">{{ c.numero_documento }}</span>) o su correo y la contraseña
               que definas aquí. Podrá ver sus mascotas, citas, historial y comprobantes.
             </p>
             <div class="field">
-              <label>Contraseña del portal</label>
-              <input v-model="passwordPortal" type="text" placeholder="Mínimo 8 caracteres" />
+              <label for="clientedet-passwordportal">Contraseña del portal</label>
+              <input id="clientedet-passwordportal" v-model="passwordPortal" type="text" placeholder="Mínimo 8 caracteres" />
             </div>
           </div>
           <div class="m-foot modal-actions">
@@ -234,14 +234,14 @@
       </div>
 
       <!-- Registrar comunicación -->
-      <div v-if="modalComunicacion" class="modal-back" @click="modalComunicacion = false">
+      <div v-if="modalComunicacion" class="modal-back" v-dialogo="() => (modalComunicacion = false)">
         <div class="modal" @click.stop>
           <div class="m-head"><h3>Registrar contacto</h3></div>
           <div class="m-body">
             <div class="form-grid">
               <div class="field">
-                <label>Tipo</label>
-                <select v-model="com.tipo">
+                <label for="clientedet-tipo">Tipo</label>
+                <select id="clientedet-tipo" v-model="com.tipo">
                   <option value="llamada">Llamada</option>
                   <option value="whatsapp">WhatsApp</option>
                   <option value="correo">Correo</option>
@@ -251,19 +251,19 @@
                 </select>
               </div>
               <div class="field">
-                <label>Mascota (opcional)</label>
-                <select v-model="com.mascota_id">
+                <label for="clientedet-mascota-id">Mascota (opcional)</label>
+                <select id="clientedet-mascota-id" v-model="com.mascota_id">
                   <option value="">Ninguna en particular</option>
                   <option v-for="m in c.mascotas" :key="m.id" :value="m.id">{{ m.nombre }}</option>
                 </select>
               </div>
               <div class="field" style="grid-column: 1 / -1">
-                <label>Asunto</label>
-                <input v-model.trim="com.asunto" type="text" />
+                <label for="clientedet-asunto">Asunto</label>
+                <input id="clientedet-asunto" v-model.trim="com.asunto" type="text" />
               </div>
               <div class="field" style="grid-column: 1 / -1">
-                <label>Detalle <span class="req">*</span></label>
-                <textarea v-model="com.mensaje" rows="3"></textarea>
+                <label for="clientedet-mensaje">Detalle <span class="req">*</span></label>
+                <textarea id="clientedet-mensaje" v-model="com.mensaje" rows="3"></textarea>
               </div>
             </div>
           </div>
@@ -281,7 +281,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   Loader2, ArrowLeft, Pencil, Plus, PawPrint, Receipt, CreditCard, Landmark,
   CalendarClock, User, MessageSquare, Globe, AlertCircle, AlertTriangle,
@@ -294,8 +294,10 @@ import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtSoles } from "../../../shared/components/ui/format.js";
 import { fmtFechaHora, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const route = useRoute();
+const router = useRouter();
 const { hasPermission } = useAuth();
 const puedeEditar = computed(() => hasPermission("clientes:editar"));
 const puedeCrearMascota = computed(() => hasPermission("mascotas:crear"));
@@ -335,15 +337,19 @@ async function cargar() {
     ]);
     c.value = ficha.data;
     comunicaciones.value = coms.data ?? [];
+  } catch (e) {
+    notify.toast(`No se pudo cargar el propietario: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }
 }
 
-function onGuardado() {
+function onGuardado(r = {}) {
+  const eraMascotaNueva = modalMascota.value && r.nuevo;
   modalEditar.value = false;
   modalMascota.value = false;
   cargar();
+  if (eraMascotaNueva) notify.toast("Paciente registrado");
 }
 
 async function activarPortal() {
@@ -380,6 +386,8 @@ async function registrarComunicacion() {
     com.asunto = "";
     com.mensaje = "";
     cargar();
+  } catch (e) {
+    notify.error("No se pudo registrar la comunicación", e.message);
   } finally {
     guardandoCom.value = false;
   }
@@ -392,7 +400,12 @@ onMounted(async () => {
   } catch {
     // El catálogo solo hace falta para registrar mascotas.
   }
-  cargar();
+  await cargar();
+  // Viene del alta de propietario con "Registrar y agregar mascota".
+  if (route.query.nuevaMascota && c.value && puedeCrearMascota.value) {
+    modalMascota.value = true;
+    router.replace({ query: {} });
+  }
 });
 
 watch(() => route.params.id, cargar);

@@ -61,7 +61,7 @@
           </thead>
           <tbody>
             <tr v-for="e in eventos" :key="e.id">
-              <td class="mono">{{ fmtFechaHora(e.created_at) }}</td>
+              <td class="cifra">{{ fmtFechaHora(e.created_at) }}</td>
               <td>
                 <div class="stack">
                   <strong>{{ e.usuario || "Sistema" }}</strong>
@@ -94,7 +94,7 @@
     </section>
 
     <!-- Detalle del cambio -->
-    <div v-if="diffSel" class="modal-back" @click="diffSel = null">
+    <div v-if="diffSel" class="modal-back" v-dialogo="() => (diffSel = null)">
       <div class="modal modal-wide" @click.stop>
         <div class="m-head">
           <h3>{{ capitalizar(diffSel.accion) }} · {{ capitalizar(diffSel.entidad) }}</h3>
@@ -102,8 +102,8 @@
         <div class="m-body">
           <div class="detalle-grid" style="margin-bottom: 14px">
             <div class="detalle-item"><div class="k">Usuario</div><div class="v">{{ diffSel.usuario || "Sistema" }}</div></div>
-            <div class="detalle-item"><div class="k">Fecha</div><div class="v mono">{{ fmtFechaHora(diffSel.created_at) }}</div></div>
-            <div class="detalle-item"><div class="k">Registro</div><div class="v mono">{{ diffSel.entidad_id || "—" }}</div></div>
+            <div class="detalle-item"><div class="k">Fecha</div><div class="v cifra">{{ fmtFechaHora(diffSel.created_at) }}</div></div>
+            <div class="detalle-item"><div class="k">Registro</div><div class="v codigo">{{ diffSel.entidad_id || "—" }}</div></div>
           </div>
 
           <div class="tabla-wrap">
@@ -133,6 +133,8 @@ import { History, RefreshCw, Loader2, CalendarRange, Database, Zap, Eye } from "
 import PageHeader from "../../../layouts/PageHeader.vue";
 import { auditoriaApi } from "../api/auditoria.api.js";
 import { fmtFechaHora, capitalizar } from "../../../shared/components/ui/format.js";
+import { hoyISO, sumarDias } from "@/shared/utils/fechas.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const ENTIDADES = [
   "users", "clientes", "mascotas", "citas", "consultas", "servicios", "productos",
@@ -148,12 +150,9 @@ const meta = ref({});
 const cargando = ref(false);
 const diffSel = ref(null);
 
-const hoy = new Date();
-const hace7 = new Date(hoy);
-hace7.setDate(hace7.getDate() - 7);
 const filtros = reactive({
-  desde: hace7.toISOString().slice(0, 10),
-  hasta: hoy.toISOString().slice(0, 10),
+  desde: sumarDias(hoyISO(), -7),
+  hasta: hoyISO(),
   entidad: "",
   accion: "",
   page: 1,
@@ -188,11 +187,9 @@ function irPagina(p) { filtros.page = p; cargar(); }
 async function cargar() {
   cargando.value = true;
   try {
-    const hastaExcl = new Date(filtros.hasta);
-    hastaExcl.setDate(hastaExcl.getDate() + 1);
     const r = await auditoriaApi.listar({
       desde: filtros.desde,
-      hasta: hastaExcl.toISOString().slice(0, 10),
+      hasta: sumarDias(filtros.hasta, 1),
       entidad: filtros.entidad || undefined,
       accion: filtros.accion || undefined,
       page: filtros.page,
@@ -200,6 +197,8 @@ async function cargar() {
     });
     eventos.value = r.data ?? [];
     meta.value = r.meta ?? {};
+  } catch (e) {
+    notify.toast(`No se pudo cargar la auditoría: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

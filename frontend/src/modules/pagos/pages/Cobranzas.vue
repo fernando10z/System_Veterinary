@@ -43,7 +43,7 @@
       <div class="module-panel-body aging">
         <div v-for="t in tramos" :key="t.key" class="aging-item">
           <div class="l">{{ t.label }}</div>
-          <div class="n mono">{{ fmtSoles(t.monto) }}</div>
+          <div class="n cifra">{{ fmtSoles(t.monto) }}</div>
           <div class="barra">
             <div class="fill" :class="t.tone" :style="{ width: t.pct + '%' }"></div>
           </div>
@@ -79,13 +79,13 @@
           </thead>
           <tbody>
             <tr v-for="c in cuentas" :key="c.id">
-              <td class="mono"><strong>{{ c.numero_completo }}</strong></td>
+              <td class="codigo"><strong>{{ c.numero_completo }}</strong></td>
               <td>{{ c.cliente }}</td>
-              <td class="mono">{{ c.cliente_telefono || "—" }}</td>
-              <td class="mono">{{ fmtDate(c.fecha_emision) }}</td>
-              <td class="mono">{{ c.fecha_vencimiento ? fmtDate(c.fecha_vencimiento) : "—" }}</td>
-              <td class="num mono">{{ fmtSoles(c.total) }}</td>
-              <td class="num mono deuda">{{ fmtSoles(c.saldo_pendiente) }}</td>
+              <td class="codigo">{{ c.cliente_telefono || "—" }}</td>
+              <td class="cifra">{{ fmtDate(c.fecha_emision) }}</td>
+              <td class="cifra">{{ c.fecha_vencimiento ? fmtDate(c.fecha_vencimiento) : "—" }}</td>
+              <td class="num cifra">{{ fmtSoles(c.total) }}</td>
+              <td class="num cifra deuda">{{ fmtSoles(c.saldo_pendiente) }}</td>
               <td>
                 <span :class="['estado-pill', toneTramo(c.tramo)]">
                   {{ labelTramo(c.tramo) }}
@@ -122,18 +122,18 @@
           </thead>
           <tbody>
             <tr v-for="p in pagos" :key="p.id" :class="p.anulado_at ? 'anulado' : ''">
-              <td class="mono">{{ p.numero }}</td>
+              <td class="codigo">{{ p.numero }}</td>
               <td>{{ p.cliente }}</td>
               <td>{{ capitalizar(p.metodo) }}</td>
-              <td class="num mono">{{ fmtSoles(p.monto) }}</td>
+              <td class="num cifra">{{ fmtSoles(p.monto) }}</td>
               <td>
-                <span v-for="a in p.aplicaciones" :key="a.comprobante_id" class="tag mono">{{ a.numero }}</span>
+                <span v-for="a in p.aplicaciones" :key="a.comprobante_id" class="tag codigo">{{ a.numero }}</span>
                 <span v-if="!p.aplicaciones?.length" class="muted">A cuenta</span>
               </td>
-              <td class="mono">{{ fmtFechaHora(p.fecha_pago) }}</td>
+              <td class="cifra">{{ fmtFechaHora(p.fecha_pago) }}</td>
               <td class="muted">{{ p.cajero || "—" }}</td>
               <td class="acciones-col">
-                <button v-if="puedeAnular && !p.anulado_at" class="btn mini" title="Anular" @click="anular(p)">
+                <button v-if="puedeAnular && !p.anulado_at" class="btn mini" title="Anular" aria-label="Anular cobro" @click="anular(p)">
                   <Ban :size="13" />
                 </button>
               </td>
@@ -142,6 +142,13 @@
         </table>
       </div>
     </section>
+
+    <CobroModal
+      v-if="cobroSel"
+      :comprobante="cobroSel"
+      @close="cobroSel = null"
+      @cobrado="onCobrado"
+    />
   </div>
 </template>
 
@@ -154,10 +161,12 @@ import {
 import PageHeader from "../../../layouts/PageHeader.vue";
 import { facturacionApi } from "../../facturacion/api/facturacion.api.js";
 import { pagosApi } from "../api/pagos.api.js";
+import CobroModal from "../components/CobroModal.vue";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtSoles, fmtDate } from "../../../shared/components/ui/format.js";
 import { fmtFechaHora, capitalizar } from "../../../shared/components/ui/format.js";
 import { notify } from "../../../shared/composables/useNotify.js";
+import { hoyISO } from "@/shared/utils/fechas.js";
 
 const { hasPermission } = useAuth();
 const puedeCobrar = computed(() => hasPermission("pagos:registrar"));
@@ -167,15 +176,16 @@ const cuentas = ref([]);
 const resumen = ref({});
 const pagos = ref([]);
 const cargando = ref(false);
+const cobroSel = ref(null);
 
 const pctVencido = computed(() => {
   const t = Number(resumen.value.total_deuda ?? 0);
   return t ? Math.round((Number(resumen.value.vencido) / t) * 100) : 0;
 });
 
-const hoyISO = new Date().toISOString().slice(0, 10);
+const hoyHoy = hoyISO();
 const pagosHoy = computed(() =>
-  pagos.value.filter((p) => !p.anulado_at && String(p.fecha_pago).slice(0, 10) === hoyISO),
+  pagos.value.filter((p) => !p.anulado_at && String(p.fecha_pago).slice(0, 10) === hoyHoy),
 );
 const cobradoHoy = computed(() => pagosHoy.value.reduce((s, p) => s + Number(p.monto), 0));
 
@@ -203,35 +213,13 @@ function labelTramo(t) {
   return { por_vencer: "Al día", "1_30": "1–30 d", "31_60": "31–60 d", "61_90": "61–90 d", mas_90: "+90 d" }[t] || t;
 }
 
-async function cobrar(c) {
-  const monto = await notify.prompt(`Cobrar ${c.numero_completo}`, {
-    text: `${c.cliente} · saldo ${fmtSoles(c.saldo_pendiente)}`,
-    inputType: "number",
-    defaultValue: String(c.saldo_pendiente),
-  });
-  if (!monto) return;
+function cobrar(c) {
+  cobroSel.value = c;
+}
 
-  const metodo = await notify.select("Método de pago", [
-    { value: "efectivo", label: "Efectivo" },
-    { value: "tarjeta", label: "Tarjeta" },
-    { value: "yape", label: "Yape" },
-    { value: "plin", label: "Plin" },
-    { value: "transferencia", label: "Transferencia" },
-  ], "efectivo");
-  if (!metodo) return;
-
-  try {
-    await pagosApi.registrar({
-      cliente_id: c.cliente_id,
-      monto: Number(monto),
-      metodo,
-      aplicaciones: [{ comprobante_id: c.id, monto: Number(monto) }],
-    });
-    notify.success("Cobro registrado");
-    cargar();
-  } catch (e) {
-    notify.error("No se pudo registrar el cobro", e.message);
-  }
+function onCobrado() {
+  cobroSel.value = null;
+  cargar();
 }
 
 async function anular(p) {
@@ -258,6 +246,8 @@ async function cargar() {
     cuentas.value = cxc.data ?? [];
     resumen.value = cxc.meta ?? {};
     pagos.value = pg.data ?? [];
+  } catch (e) {
+    notify.error("No se pudieron cargar las cobranzas", e.message);
   } finally {
     cargando.value = false;
   }
@@ -277,7 +267,7 @@ onMounted(cargar);
 .aging-item .d { font-size: 11.5px; color: var(--ink-4); text-align: right; }
 .aging-item .barra { height: 8px; border-radius: 999px; background: var(--bg-soft); overflow: hidden; }
 .aging-item .fill { height: 100%; border-radius: 999px; }
-.aging-item .fill.ok { background: var(--emerald); }
+.aging-item .fill.ok { background: var(--serie-1); }
 .aging-item .fill.info { background: var(--blue); }
 .aging-item .fill.warn { background: var(--amber); }
 .aging-item .fill.danger { background: var(--red); }

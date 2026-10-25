@@ -155,7 +155,11 @@ BEGIN
            'igv',                 i.igv,
            'total',               i.total) ORDER BY i.orden), '[]'::jsonb)
     INTO v_items
-    FROM core.comprobante_items i WHERE i.comprobante_id = p_id;
+    FROM core.comprobante_items i
+   -- Una línea en cero (lo cubrió entero el plan) no es una operación gravada
+   -- ante SUNAT: declararla como '10' con valor cero se rechaza. Queda en el
+   -- comprobante del ERP —el propietario ve qué recibió— y fuera del XML.
+   WHERE i.comprobante_id = p_id AND i.total > 0;
 
   v_cab := jsonb_build_object(
     'id', v_c.id,
@@ -174,7 +178,8 @@ BEGIN
     'subtotal', v_c.subtotal,
     'igv', v_c.igv,
     'total', v_c.total,
-    'descuento_global', v_c.descuento_global,
+    -- Ya está prorrateado en las líneas: mandarlo aparte lo descontaría dos veces.
+    'descuento_global', 0,
     'observaciones', v_c.observaciones,
     'motivo_nota', v_c.motivo_nota,
     'codigo_tipo_nota', v_c.codigo_tipo_nota,
@@ -183,10 +188,10 @@ BEGIN
     -- suelto: si un ítem va exonerado, su base no puede sumar al gravado.
     'subtotal_gravado', (
       SELECT COALESCE(SUM(i.subtotal), 0) FROM core.comprobante_items i
-       WHERE i.comprobante_id = p_id AND i.afecto_igv),
+       WHERE i.comprobante_id = p_id AND i.afecto_igv AND i.total > 0),
     'subtotal_exonerado', (
       SELECT COALESCE(SUM(i.subtotal), 0) FROM core.comprobante_items i
-       WHERE i.comprobante_id = p_id AND NOT i.afecto_igv),
+       WHERE i.comprobante_id = p_id AND NOT i.afecto_igv AND i.total > 0),
     -- Contado o crédito: lo decide que el comprobante tenga vencimiento futuro.
     'forma_pago', CASE
       WHEN v_c.fecha_vencimiento IS NOT NULL
@@ -242,17 +247,29 @@ DECLARE
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
 
+  IF NOT EXISTS (SELECT 1 FROM core.comprobantes
+                  WHERE id = p_id AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Comprobante no encontrado'));
+  END IF;
+
+  -- Solo avanza lo que estaba por enviar o se reintenta. Un documento que ya
+  -- llegó a SUNAT no retrocede a "enviado", y uno anulado no revive.
   UPDATE core.comprobantes
      SET estado          = 'enviado_sunat',
          pse_request_id  = p_request_id,
          enviado_pse_at  = now(),
+         envio_en_curso_at = NULL,
          updated_at = now(), updated_by = p_user_id
-   WHERE id = p_id AND deleted_at IS NULL
-     AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id);
+   WHERE id = p_id
+     AND anulado_at IS NULL
+     AND estado IN ('emitido','pendiente_envio','rechazado_sunat','enviado_sunat');
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false,
-      'error', internal.error_jsonb('NOT_FOUND','Comprobante no encontrado'));
+      'error', internal.error_jsonb('CONFLICT',
+        'El comprobante ya no está pendiente de envío (fue aceptado o anulado)'));
   END IF;
 
   INSERT INTO core.comprobante_pse_log (comprobante_id, operacion, request, exito, mensaje, created_by)
@@ -260,6 +277,88 @@ BEGIN
 
   RETURN jsonb_build_object('ok', true,
     'data', jsonb_build_object('id', p_id, 'estado', 'enviado_sunat'));
+
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- app.sp_comprobante_reservar_envio
+--
+-- Toma el comprobante para enviarlo. Hablar con el PSE tarda segundos, y en
+-- ese rato otra pestaña podía enviarlo también (dos envíos del mismo número) o
+-- alguien anularlo (y luego la respuesta lo marcaba como aceptado). La reserva
+-- es un UPDATE condicional: solo uno la gana. Caduca a los 2 minutos para que
+-- un envío que se colgó no deje el documento bloqueado para siempre.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.sp_comprobante_reservar_envio(
+  p_user_id        UUID,
+  p_empresa_id     UUID,
+  p_is_super_admin BOOLEAN,
+  p_id             UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, app, internal, public
+AS $$
+DECLARE
+  v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
+
+  IF NOT EXISTS (SELECT 1 FROM core.comprobantes
+                  WHERE id = p_id AND deleted_at IS NULL
+                    AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Comprobante no encontrado'));
+  END IF;
+
+  UPDATE core.comprobantes
+     SET envio_en_curso_at = now()
+   WHERE id = p_id
+     AND anulado_at IS NULL
+     AND estado IN ('emitido','pendiente_envio','rechazado_sunat','enviado_sunat')
+     AND (envio_en_curso_at IS NULL OR envio_en_curso_at < now() - INTERVAL '2 minutes');
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('CONFLICT',
+        'El comprobante se está enviando en este momento o ya no está pendiente'));
+  END IF;
+
+  RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', p_id));
+
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- app.sp_comprobante_liberar_envio — el envío falló: se suelta la reserva
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.sp_comprobante_liberar_envio(
+  p_user_id        UUID,
+  p_empresa_id     UUID,
+  p_is_super_admin BOOLEAN,
+  p_id             UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = core, app, internal, public
+AS $$
+DECLARE
+  v_emp UUID := internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin);
+BEGIN
+  PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
+
+  UPDATE core.comprobantes SET envio_en_curso_at = NULL
+   WHERE id = p_id
+     AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id);
+
+  RETURN jsonb_build_object('ok', true, 'data', jsonb_build_object('id', p_id));
 
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('ok', false, 'error', internal.error_jsonb(SQLSTATE, SQLERRM));
@@ -296,9 +395,17 @@ BEGIN
     hash_cpe          = COALESCE(NULLIF(p_payload->>'hash_cpe',''), hash_cpe),
     sunat_codigo      = COALESCE(NULLIF(p_payload->>'sunat_codigo',''), sunat_codigo),
     sunat_mensaje     = COALESCE(NULLIF(p_payload->>'sunat_mensaje',''), sunat_mensaje),
-    estado            = COALESCE(v_estado, estado),
-    aceptado_sunat_at = CASE WHEN v_estado = 'aceptado_sunat'
+    -- Un anulado no revive por una respuesta tardía, y un aceptado no vuelve
+    -- atrás porque una reconsulta devolvió "en proceso".
+    estado            = CASE
+                          WHEN v_estado IS NULL OR anulado_at IS NOT NULL THEN estado
+                          WHEN estado IN ('aceptado_sunat','observado_sunat')
+                               AND v_estado IN ('emitido','pendiente_envio','enviado_sunat')
+                          THEN estado
+                          ELSE v_estado END,
+    aceptado_sunat_at = CASE WHEN v_estado = 'aceptado_sunat' AND anulado_at IS NULL
                              THEN COALESCE(aceptado_sunat_at, now()) ELSE aceptado_sunat_at END,
+    envio_en_curso_at = NULL,
     updated_at = now(), updated_by = p_user_id
   WHERE id = p_id AND deleted_at IS NULL
     AND internal.es_de_empresa(p_user_id, p_is_super_admin, v_emp, empresa_id);
@@ -341,6 +448,13 @@ DECLARE
   v_intento INT;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'facturacion:emitir');
+
+  IF NOT EXISTS (SELECT 1 FROM core.comprobantes
+                  WHERE id = p_id AND internal.es_de_empresa(p_user_id, p_is_super_admin,
+                    internal.empresa_efectiva(p_user_id, p_empresa_id, p_is_super_admin), empresa_id)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Comprobante no encontrado'));
+  END IF;
 
   SELECT COALESCE(MAX(intento), 0) + 1 INTO v_intento
     FROM core.comprobante_pse_log WHERE comprobante_id = p_id;
@@ -392,6 +506,12 @@ BEGIN
   FROM (
     SELECT c.id, c.numero_completo, c.tipo, c.fecha_emision, c.total, c.estado,
            c.sunat_codigo, c.sunat_mensaje, c.enviado_pse_at,
+           -- SUNAT da 3 días calendario para recibir el comprobante. Lo que
+           -- vence hoy va primero en la cola del cierre.
+           3 - ((now() AT TIME ZONE 'America/Lima')::date
+                - (c.fecha_emision AT TIME ZONE 'America/Lima')::date) AS dias_para_vencer,
+           ((now() AT TIME ZONE 'America/Lima')::date
+             - (c.fecha_emision AT TIME ZONE 'America/Lima')::date) > 3 AS fuera_de_plazo,
            trim(cl.nombres || ' ' || COALESCE(cl.apellido_paterno,'')) AS cliente,
            (SELECT count(*) FROM core.comprobante_pse_log l WHERE l.comprobante_id = c.id) AS intentos
       FROM core.comprobantes c

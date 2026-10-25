@@ -33,10 +33,16 @@ class EnvVars {
   @IsString() STORAGE_ACCESS_KEY!: string;
   @IsString() STORAGE_SECRET_KEY!: string;
   @IsString() STORAGE_BUCKET!: string;
+  // Dirección por la que el NAVEGADOR llega a MinIO (solo para firmar URLs).
+  // En el despliegue con nginx: el propio dominio, p. ej. https://vet.clinica.pe
+  @IsOptional() @IsString() STORAGE_PUBLIC_ENDPOINT?: string;
 
   @IsString() REDIS_HOST!: string;
   @IsNumberString() REDIS_PORT!: string;
   @IsOptional() @IsString() REDIS_PASSWORD?: string;
+
+  @IsOptional() @IsBooleanString() COOKIE_SECURE?: string;
+  @IsOptional() @IsString() TRUST_PROXY?: string;
 
   // Cifra la clave del PSE guardada por empresa. Sin ella no se puede emitir
   // electrónicamente, pero el resto del ERP funciona: por eso no es obligatoria.
@@ -57,14 +63,40 @@ class EnvVars {
   @IsOptional() @IsString() MAIL_FROM?: string;
 }
 
+/**
+ * Reglas que solo aplican en producción. Conectarse como `postgres` funciona,
+ * y por eso nadie lo nota: deja sin efecto toda la separación de 90_grants.sql
+ * (el backend solo debe poder EXECUTE sobre app.*). En producción no se arranca
+ * así salvo que se declare a propósito con ALLOW_DB_SUPERUSER=true.
+ */
+export function reglasProduccion(raw: Record<string, unknown>): string[] {
+  if (raw.NODE_ENV !== "production") return [];
+  const errores: string[] = [];
+  try {
+    const usuario = decodeURIComponent(new URL(String(raw.DATABASE_URL ?? "")).username);
+    if (usuario === "postgres" && raw.ALLOW_DB_SUPERUSER !== "true") {
+      errores.push(
+        "DATABASE_URL: en producción el backend se conecta con vet_app_user, no con postgres",
+      );
+    }
+  } catch {
+    /* el formato ya lo valida MinLength; aquí solo interesa el usuario */
+  }
+  if (!raw.ENCRYPTION_KEY) {
+    errores.push("ENCRYPTION_KEY: obligatoria en producción (cifra las credenciales del PSE)");
+  }
+  return errores;
+}
+
 export function validateEnv(raw: Record<string, unknown>): EnvVars {
   const obj = plainToInstance(EnvVars, raw, { enableImplicitConversion: true });
   const errors = validateSync(obj, { skipMissingProperties: false, whitelist: false });
-  if (errors.length) {
-    const summary = errors
-      .map((e) => `${e.property}: ${Object.values(e.constraints ?? {}).join(", ")}`)
-      .join("\n  ");
-    throw new Error(`Variables de entorno inválidas:\n  ${summary}`);
+  const lineas = [
+    ...errors.map((e) => `${e.property}: ${Object.values(e.constraints ?? {}).join(", ")}`),
+    ...reglasProduccion(raw),
+  ];
+  if (lineas.length) {
+    throw new Error(`Variables de entorno inválidas:\n  ${lineas.join("\n  ")}`);
   }
   return obj;
 }

@@ -100,19 +100,19 @@
             <tr v-for="c in comprobantes" :key="c.id" class="clickable" @click="verDetalle(c)">
               <td>
                 <div class="stack">
-                  <strong class="mono">{{ c.numero_completo }}</strong>
+                  <strong class="codigo">{{ c.numero_completo }}</strong>
                   <small class="muted">{{ capitalizar(c.tipo) }}</small>
                 </div>
               </td>
               <td>
                 <div class="stack">
                   <span>{{ c.cliente_facturacion || c.cliente }}</span>
-                  <small class="muted mono">{{ c.cliente_tipo_doc }} {{ c.cliente_documento }}</small>
+                  <small class="muted codigo">{{ c.cliente_tipo_doc }} {{ c.cliente_documento }}</small>
                 </div>
               </td>
-              <td class="mono">{{ fmtFechaHora(c.fecha_emision) }}</td>
-              <td class="num mono">{{ fmtSoles(c.total) }}</td>
-              <td class="num mono">
+              <td class="cifra">{{ fmtFechaHora(c.fecha_emision) }}</td>
+              <td class="num cifra">{{ fmtSoles(c.total) }}</td>
+              <td class="num cifra">
                 <span :class="Number(c.saldo_pendiente) > 0 ? 'deuda' : 'muted'">
                   {{ fmtSoles(c.saldo_pendiente) }}
                 </span>
@@ -129,13 +129,13 @@
               </td>
               <td class="acciones-col" @click.stop>
                 <div class="row-actions">
-                  <button class="btn mini" title="Ver detalle" @click="verDetalle(c)"><FileText :size="13" /></button>
+                  <button class="btn mini" title="Ver detalle" @click="verDetalle(c)" aria-label="Ver detalle"><FileText :size="13" /></button>
                   <button
                     v-if="puedeAnular && !c.anulado_at && c.estado !== 'anulado'"
                     class="btn mini"
                     title="Anular"
                     @click="anular(c)"
-                  >
+                   aria-label="Anular">
                     <Ban :size="13" />
                   </button>
                 </div>
@@ -154,10 +154,10 @@
       </div>
     </section>
 
-    <EmitirComprobanteModal
+    <CobroRapido
       v-if="modalEmitir"
       @close="modalEmitir = false"
-      @emitido="onEmitido"
+      @listo="onEmitido"
     />
 
     <ComprobanteDetalleModal
@@ -176,13 +176,14 @@ import {
   Filter, CalendarRange, FileText, Ban,
 } from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
-import EmitirComprobanteModal from "../components/EmitirComprobanteModal.vue";
+import CobroRapido from "../components/CobroRapido.vue";
 import ComprobanteDetalleModal from "../components/ComprobanteDetalleModal.vue";
 import { facturacionApi } from "../api/facturacion.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtSoles } from "../../../shared/components/ui/format.js";
 import { fmtFechaHora, capitalizar } from "../../../shared/components/ui/format.js";
 import { notify } from "../../../shared/composables/useNotify.js";
+import { hoyISO, inicioMesISO, sumarDias } from "@/shared/utils/fechas.js";
 
 const { hasPermission } = useAuth();
 const puedeEmitir = computed(() => hasPermission("facturacion:emitir"));
@@ -194,12 +195,10 @@ const cargando = ref(false);
 const modalEmitir = ref(false);
 const detalleId = ref(null);
 
-const hoy = new Date();
-const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
 const filtros = reactive({
   buscar: "",
-  desde: inicioMes.toISOString().slice(0, 10),
-  hasta: hoy.toISOString().slice(0, 10),
+  desde: inicioMesISO(),
+  hasta: hoyISO(),
   tipo: "",
   estadoPago: "",
   page: 1,
@@ -231,10 +230,9 @@ function recargar() { filtros.page = 1; cargar(); }
 function irPagina(p) { filtros.page = p; cargar(); }
 function verDetalle(c) { detalleId.value = c.id; }
 
-function onEmitido(data) {
+function onEmitido() {
   modalEmitir.value = false;
   cargar();
-  notify.success("Comprobante emitido", `${data.numero_completo} · ${fmtSoles(data.total)}`);
 }
 
 async function anular(c) {
@@ -255,12 +253,10 @@ async function anular(c) {
 async function cargar() {
   cargando.value = true;
   try {
-    const hastaExcl = new Date(filtros.hasta);
-    hastaExcl.setDate(hastaExcl.getDate() + 1);
     const r = await facturacionApi.listar({
       buscar: filtros.buscar || undefined,
       desde: filtros.desde,
-      hasta: hastaExcl.toISOString().slice(0, 10),
+      hasta: sumarDias(filtros.hasta, 1),
       tipo: filtros.tipo || undefined,
       estadoPago: filtros.estadoPago || undefined,
       page: filtros.page,
@@ -268,6 +264,8 @@ async function cargar() {
     });
     comprobantes.value = r.data ?? [];
     meta.value = r.meta ?? {};
+  } catch (e) {
+    notify.toast(`No se pudieron cargar los comprobantes: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

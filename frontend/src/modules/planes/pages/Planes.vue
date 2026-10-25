@@ -141,41 +141,41 @@
     </section>
 
     <!-- ══════════ Modal: plan ══════════ -->
-    <div v-if="modalPlan" class="modal-back" @click="modalPlan = null">
+    <div v-if="modalPlan" class="modal-back" v-dialogo="() => (modalPlan = null)">
       <div class="modal modal-wide" @click.stop>
         <div class="m-head"><h3>{{ modalPlan.id ? "Editar plan" : "Nuevo plan" }}</h3></div>
         <div class="m-body">
           <div class="form-grid">
             <div class="field" style="grid-column: 1 / -1">
-              <label>Nombre <span class="req">*</span></label>
-              <input v-model="modalPlan.nombre" placeholder="Plan Cachorro" />
+              <label for="planes-nombre">Nombre <span class="req">*</span></label>
+              <input id="planes-nombre" v-model="modalPlan.nombre" placeholder="Plan Cachorro" />
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Descripción</label>
-              <textarea v-model="modalPlan.descripcion" rows="2"></textarea>
+              <label for="planes-descripcion">Descripción</label>
+              <textarea id="planes-descripcion" v-model="modalPlan.descripcion" rows="2"></textarea>
             </div>
-            <div class="field"><label>Cuota (S/)</label>
-              <input v-model.number="modalPlan.precio" type="number" step="0.01" min="0" /></div>
-            <div class="field"><label>Se cobra</label>
-              <select v-model="modalPlan.periodicidad">
+            <div class="field"><label for="planes-precio">Cuota (S/)</label>
+              <input id="planes-precio" v-model.number="modalPlan.precio" type="number" step="0.01" min="0" /></div>
+            <div class="field"><label for="planes-periodicidad">Se cobra</label>
+              <select id="planes-periodicidad" v-model="modalPlan.periodicidad">
                 <option v-for="p in PERIODICIDADES" :key="p.v" :value="p.v">{{ p.t }}</option>
               </select></div>
-            <div class="field"><label>Vigencia (meses)</label>
-              <input v-model.number="modalPlan.vigencia_meses" type="number" min="1" max="120" /></div>
-            <div class="field"><label>Descuento general (%)</label>
-              <input v-model.number="modalPlan.descuento_general_pct" type="number" min="0" max="100" />
+            <div class="field"><label for="planes-vigencia-meses">Vigencia (meses)</label>
+              <input id="planes-vigencia-meses" v-model.number="modalPlan.vigencia_meses" type="number" min="1" max="120" /></div>
+            <div class="field"><label for="planes-descuento-general-pct">Descuento general (%)</label>
+              <input id="planes-descuento-general-pct" v-model.number="modalPlan.descuento_general_pct" type="number" min="0" max="100" />
               <small class="muted">Sobre todo lo que no esté incluido abajo.</small></div>
-            <div class="field"><label>Especie</label>
-              <select v-model="modalPlan.especie_id">
+            <div class="field"><label for="planes-especie-id">Especie</label>
+              <select id="planes-especie-id" v-model="modalPlan.especie_id">
                 <option value="">Cualquiera</option>
                 <option v-for="e in especies" :key="e.id" :value="e.id">{{ e.nombre }}</option>
               </select></div>
-            <div class="field"><label>Color</label>
-              <input v-model="modalPlan.color" type="color" /></div>
-            <div class="field"><label>Edad mínima (meses)</label>
-              <input v-model.number="modalPlan.edad_min_meses" type="number" min="0" /></div>
-            <div class="field"><label>Edad máxima (meses)</label>
-              <input v-model.number="modalPlan.edad_max_meses" type="number" min="0" />
+            <div class="field"><label for="planes-color">Color</label>
+              <input id="planes-color" v-model="modalPlan.color" type="color" /></div>
+            <div class="field"><label for="planes-edad-min-meses">Edad mínima (meses)</label>
+              <input id="planes-edad-min-meses" v-model.number="modalPlan.edad_min_meses" type="number" min="0" /></div>
+            <div class="field"><label for="planes-edad-max-meses">Edad máxima (meses)</label>
+              <input id="planes-edad-max-meses" v-model.number="modalPlan.edad_max_meses" type="number" min="0" />
               <small class="muted">Evita vender un plan de cachorro a un perro de diez años.</small></div>
 
             <div class="field" style="grid-column: 1 / -1">
@@ -207,14 +207,14 @@
     </div>
 
     <!-- ══════════ Modal: suscribir ══════════ -->
-    <div v-if="modalSus" class="modal-back" @click="modalSus = null">
+    <div v-if="modalSus" class="modal-back" v-dialogo="() => (modalSus = null)">
       <div class="modal" @click.stop>
         <div class="m-head"><h3>Suscribir paciente a un plan</h3></div>
         <div class="m-body">
           <div class="form-grid">
             <div class="field" style="grid-column: 1 / -1">
-              <label>Paciente <span class="req">*</span></label>
-              <select v-model="modalSus.mascota_id">
+              <label for="planes-mascota-id">Paciente <span class="req">*</span></label>
+              <select id="planes-mascota-id" v-model="modalSus.mascota_id">
                 <option value="">Elige un paciente…</option>
                 <option v-for="m in mascotas" :key="m.id" :value="m.id">
                   {{ m.nombre }}<template v-if="m.propietario"> — {{ m.propietario }}</template>
@@ -225,18 +225,18 @@
               </small>
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Plan <span class="req">*</span></label>
-              <select v-model="modalSus.plan_id">
+              <label for="planes-plan-id">Plan <span class="req">*</span></label>
+              <select id="planes-plan-id" v-model="modalSus.plan_id">
                 <option value="">Elige un plan…</option>
                 <option v-for="p in planesActivos" :key="p.id" :value="p.id">
                   {{ p.nombre }} — {{ fmtSoles(p.precio) }}/{{ CADA[p.periodicidad] }}
                 </option>
               </select>
             </div>
-            <div class="field"><label>Empieza</label>
-              <input v-model="modalSus.fecha_inicio" type="date" /></div>
-            <div class="field"><label>Cuota pactada (S/)</label>
-              <input v-model.number="modalSus.precio_pactado" type="number" step="0.01" min="0" />
+            <div class="field"><label for="planes-fecha-inicio">Empieza</label>
+              <input id="planes-fecha-inicio" v-model="modalSus.fecha_inicio" type="date" /></div>
+            <div class="field"><label for="planes-precio-pactado">Cuota pactada (S/)</label>
+              <input id="planes-precio-pactado" v-model.number="modalSus.precio_pactado" type="number" step="0.01" min="0" />
               <small class="muted">Vacío = la del plan. Se congela al contratar.</small></div>
           </div>
         </div>
@@ -453,7 +453,7 @@ onMounted(cargar);
 .kpi-mini { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px }
 .kpi-mini.alerta { border-color: #e8c08a }
 .kpi-mini .k { display: block; font-size: 11.5px; color: var(--ink-3) }
-.kpi-mini .v { font-size: 20px; font-weight: 700 }
+.kpi-mini .v { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 700 }
 .kpi-mini .pie { display: block; font-size: 10.5px; color: var(--ink-4); font-style: normal }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; margin-top: 14px }

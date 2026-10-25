@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal" @click.stop>
       <div class="m-head"><h3>Movimiento de inventario</h3></div>
 
@@ -9,8 +9,8 @@
         </div>
 
         <div class="field">
-          <label>Producto <span class="req">*</span></label>
-          <select v-model="form.producto_id">
+          <label for="movimiento-producto-id">Producto <span class="req">*</span></label>
+          <select id="movimiento-producto-id" v-model="form.producto_id">
             <option value="">Seleccionar…</option>
             <option v-for="p in productos" :key="p.id" :value="p.id">
               {{ p.nombre }} ({{ p.stock_actual }} {{ p.unidad_medida }})
@@ -20,8 +20,8 @@
 
         <div class="form-grid">
           <div class="field">
-            <label>Tipo</label>
-            <select v-model="form.tipo" @change="sincronizarMotivo">
+            <label for="movimiento-tipo">Tipo</label>
+            <select id="movimiento-tipo" v-model="form.tipo" @change="sincronizarMotivo">
               <option value="entrada">Entrada</option>
               <option value="salida">Salida</option>
               <option value="ajuste_positivo">Ajuste (+)</option>
@@ -31,8 +31,8 @@
             </select>
           </div>
           <div class="field">
-            <label>Motivo</label>
-            <select v-model="form.motivo">
+            <label for="movimiento-motivo">Motivo</label>
+            <select id="movimiento-motivo" v-model="form.motivo">
               <option value="compra">Compra</option>
               <option value="venta">Venta</option>
               <option value="uso_clinico">Uso clínico</option>
@@ -44,28 +44,28 @@
             </select>
           </div>
           <div class="field">
-            <label>Cantidad <span class="req">*</span></label>
-            <input v-model.number="form.cantidad" type="number" min="0.01" step="0.01" />
+            <label for="movimiento-cantidad">Cantidad <span class="req">*</span></label>
+            <input id="movimiento-cantidad" v-model.number="form.cantidad" type="number" min="0.01" step="0.01" />
           </div>
           <div class="field">
-            <label>Costo unitario (S/)</label>
-            <input v-model.number="form.costo_unitario" type="number" min="0" step="0.01" />
+            <label for="movimiento-costo-unitario">Costo unitario (S/)</label>
+            <input id="movimiento-costo-unitario" v-model.number="form.costo_unitario" type="number" min="0" step="0.01" />
           </div>
           <div v-if="almacenes.length > 1" class="field" style="grid-column: 1 / -1">
-            <label>Almacén</label>
-            <select v-model="form.almacen_id">
+            <label for="movimiento-almacen-id">Almacén</label>
+            <select id="movimiento-almacen-id" v-model="form.almacen_id">
               <option value="">Principal</option>
               <option v-for="a in almacenes" :key="a.id" :value="a.id">{{ a.nombre }}</option>
             </select>
           </div>
           <div class="field" style="grid-column: 1 / -1">
-            <label>Observaciones</label>
-            <textarea v-model="form.observaciones" rows="2"></textarea>
+            <label for="movimiento-observaciones">Observaciones</label>
+            <textarea id="movimiento-observaciones" v-model="form.observaciones" rows="2"></textarea>
           </div>
         </div>
 
         <p v-if="stockResultante !== null" class="resultado">
-          Stock resultante: <strong class="mono">{{ stockResultante }}</strong>
+          Stock resultante: <strong class="cifra">{{ stockResultante }}</strong>
         </p>
       </div>
 

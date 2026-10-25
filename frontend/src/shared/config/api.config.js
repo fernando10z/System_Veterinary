@@ -1,4 +1,8 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3100/api";
+// En desarrollo el backend corre aparte en :3100; en un build de producción el
+// frontend se sirve detrás del mismo dominio (nginx hace de proxy a /api), así
+// que el fallback es relativo y funciona en cualquier host o IP de la clínica.
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? "/api" : "http://localhost:3100/api");
 
 // Claves con prefijo propio: si alguien abre este ERP y el de maquinaria en el
 // mismo navegador, las sesiones no se pisan.

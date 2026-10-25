@@ -1,5 +1,9 @@
 <template>
-  <aside :class="['sidebar', isCollapsed ? 'is-collapsed' : '']">
+  <aside
+    :class="['sidebar', isCollapsed ? 'is-collapsed' : '', isMobile ? 'is-mobile' : '', mobileOpen ? 'is-open' : '']"
+    :aria-hidden="isMobile && !mobileOpen ? 'true' : undefined"
+    aria-label="Menú principal"
+  >
     <div class="brand">
       <div class="brand-logo" aria-hidden="true">
         <PawPrint :size="19" />
@@ -38,19 +42,22 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed } from "vue";
 import { useRoute } from "vue-router";
 import { PawPrint } from "lucide-vue-next";
 import { useAuth } from "../shared/composables/useAuth.js";
 import { useSidebar } from "../shared/composables/useSidebar.js";
 import { NAV_SECTIONS } from "../shared/config/navigation.js";
-import { empresasApi } from "../modules/configuracion/api/empresas.api.js";
+import { useEmpresa } from "../shared/composables/useEmpresa.js";
 
 const route = useRoute();
 const { user: userRef, hasPermission, isSuperAdmin } = useAuth();
-const { isCollapsed } = useSidebar();
+const { isCollapsed: colapsadoGuardado, isMobile, mobileOpen } = useSidebar();
+// En celular el panel se abre completo (con textos), nunca como riel de íconos.
+const isCollapsed = computed(() => colapsadoGuardado.value && !isMobile.value);
 const user = computed(() => userRef.value);
-const empresa = ref(null);
+// Un super admin sin empresa asignada no rompe el sidebar: usa el nombre por defecto.
+const { empresa } = useEmpresa();
 
 const visibleSections = computed(() =>
   NAV_SECTIONS.map((sec) => ({
@@ -73,14 +80,6 @@ function esActivo(to) {
   return route.path === to || route.path.startsWith(to + "/");
 }
 
-onMounted(async () => {
-  try {
-    const r = await empresasApi.actual();
-    empresa.value = r.data;
-  } catch {
-    // Un super admin sin empresa asignada no rompe el sidebar: usa el nombre por defecto.
-  }
-});
 </script>
 
 <style scoped>
@@ -89,7 +88,6 @@ onMounted(async () => {
 .sidebar.is-collapsed { padding: 14px 8px; }
 
 .brand-text { flex: 1; min-width: 0; }
-.brand-logo { color: #fff; }
 
 .sidebar.is-collapsed .brand { padding: 8px 4px 16px; justify-content: center; }
 .sidebar.is-collapsed .brand-logo { margin: 0 auto; }

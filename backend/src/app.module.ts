@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
-import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
+import { ThrottlerModule } from "@nestjs/throttler";
 import { ScheduleModule } from "@nestjs/schedule";
 import { JwtModule } from "@nestjs/jwt";
 import { join } from "path";
@@ -20,6 +20,7 @@ import { LoggerModule } from "./infrastructure/logger/logger.module";
 import { HealthModule } from "./infrastructure/health/health.module";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
+import { ThrottlerVetGuard } from "./common/guards/throttler-vet.guard";
 import { GlobalExceptionFilter } from "./common/filters/global-exception.filter";
 import { RequestIdInterceptor } from "./common/interceptors/request-id.interceptor";
 
@@ -103,7 +104,7 @@ import { PlanesModule } from "./modules/planes/planes.module";
     PlanesModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: ThrottlerVetGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },

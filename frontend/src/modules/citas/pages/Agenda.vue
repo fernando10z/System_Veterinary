@@ -7,9 +7,13 @@
     >
       <template #actions>
         <div class="fil">
-          <ChevronLeft :size="14" class="nav-dia" @click="moverDia(-1)" />
-          <input v-model="fecha" type="date" @change="cargar" />
-          <ChevronRight :size="14" class="nav-dia" @click="moverDia(1)" />
+          <button type="button" class="nav-dia" aria-label="Día anterior" title="Día anterior" @click="moverDia(-1)">
+            <ChevronLeft :size="14" />
+          </button>
+          <input v-model="fecha" type="date" aria-label="Fecha de la agenda" @change="cargar" />
+          <button type="button" class="nav-dia" aria-label="Día siguiente" title="Día siguiente" @click="moverDia(1)">
+            <ChevronRight :size="14" />
+          </button>
         </div>
         <button class="btn" @click="irHoy">Hoy</button>
         <button class="btn" :disabled="cargando" @click="cargar">
@@ -120,6 +124,13 @@
             <div v-if="c.alergias" class="meta alergia">
               <AlertTriangle :size="11" /> {{ c.alergias }}
             </div>
+            <button
+              v-if="puedeCobrar && c.estado === 'completada'"
+              class="btn mini cobrar-card"
+              @click.stop="cobrar(c)"
+            >
+              <Wallet :size="12" /> Cobrar
+            </button>
             <div class="pie">
               <span class="tag">{{ c.servicio || "Sin servicio" }}</span>
               <span v-if="c.veterinario" class="vet-dot" :style="{ background: c.color_agenda || 'var(--emerald)' }" :title="c.veterinario"></span>
@@ -144,7 +155,7 @@
           </thead>
           <tbody>
             <tr v-for="c in citas" :key="c.id" class="clickable" @click="abrirDetalle(c)">
-              <td class="mono">{{ fmtHora(c.fecha_hora) }}</td>
+              <td class="cifra">{{ fmtHora(c.fecha_hora) }}</td>
               <td>
                 <div class="entidad-cell">
                   <div class="avatar-sm">
@@ -160,7 +171,7 @@
               <td>
                 <div class="stack">
                   <span>{{ c.cliente }}</span>
-                  <small class="muted mono">{{ c.cliente_telefono || "—" }}</small>
+                  <small class="muted codigo">{{ c.cliente_telefono || "—" }}</small>
                 </div>
               </td>
               <td>{{ c.servicio || "—" }}</td>
@@ -172,6 +183,13 @@
               </td>
               <td class="acciones-col" @click.stop>
                 <div class="row-actions">
+                  <button
+                    v-if="puedeCobrar && c.estado === 'completada'"
+                    class="btn mini"
+                    @click="cobrar(c)"
+                  >
+                    <Wallet :size="12" /> Cobrar
+                  </button>
                   <button
                     v-if="siguientePaso(c.estado)"
                     class="btn mini primary"
@@ -203,6 +221,19 @@
       :cita-id="citaSel.id"
       @close="citaSel = null"
       @cambiado="cargar"
+      @cobrar="(c) => { citaSel = null; cobrar(c); }"
+    />
+
+    <!-- ---------- Cobro: comprobante + pago sin salir de la agenda ---------- -->
+    <CobroRapido
+      v-if="cobroCita"
+      :cliente="{ id: cobroCita.cliente_id, nombre_completo: cobroCita.cliente }"
+      :mascota="cobroCita.mascota"
+      :mascota-id="cobroCita.mascota_id"
+      :cita-id="cobroCita.id"
+      :consulta-id="cobroCita.consulta_id || ''"
+      @close="cobroCita = null"
+      @listo="cobroCita = null"
     />
   </div>
 </template>
@@ -212,21 +243,25 @@ import { ref, reactive, computed, onMounted } from "vue";
 import {
   CalendarClock, CalendarCheck, CalendarX, RefreshCw, Plus, Search, Loader2,
   AlertCircle, AlertTriangle, Users, Siren, Stethoscope, LayoutGrid, List,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Wallet,
 } from "lucide-vue-next";
 import PageHeader from "../../../layouts/PageHeader.vue";
 import CitaModal from "../components/CitaModal.vue";
 import CitaDetalleModal from "../components/CitaDetalleModal.vue";
+import CobroRapido from "../../facturacion/components/CobroRapido.vue";
 import { citasApi } from "../api/citas.api.js";
 import { usersApi } from "../../users/api/users.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtHora, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
 import { notify } from "../../../shared/composables/useNotify.js";
+import { hoyISO, sumarDias } from "@/shared/utils/fechas.js";
 
 const { hasPermission } = useAuth();
 const puedeCrear = computed(() => hasPermission("citas:crear"));
+const puedeCobrar = computed(() => hasPermission("facturacion:emitir"));
+const cobroCita = ref(null);
+function cobrar(c) { cobroCita.value = c; }
 
-const hoyISO = () => new Date().toISOString().slice(0, 10);
 const fecha = ref(hoyISO());
 const vista = ref("tablero");
 const citas = ref([]);
@@ -288,9 +323,7 @@ async function avanzar(c) {
 }
 
 function moverDia(delta) {
-  const [y, m, d] = fecha.value.split("-").map(Number);
-  const nd = new Date(y, m - 1, d + delta);
-  fecha.value = nd.toISOString().slice(0, 10);
+  fecha.value = sumarDias(fecha.value, delta);
   cargar();
 }
 function irHoy() {
@@ -320,8 +353,7 @@ async function cargar() {
   cargando.value = true;
   error.value = "";
   try {
-    const [y, m, d] = fecha.value.split("-").map(Number);
-    const siguiente = new Date(y, m - 1, d + 1).toISOString().slice(0, 10);
+    const siguiente = sumarDias(fecha.value, 1);
     const [lista, dia] = await Promise.all([
       citasApi.listar({
         desde: fecha.value,
@@ -355,8 +387,13 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.nav-dia { cursor: pointer; color: var(--ink-3); }
-.nav-dia:hover { color: var(--ink); }
+.nav-dia {
+  cursor: pointer; color: var(--ink-3); background: none; border: none;
+  display: inline-grid; place-items: center; min-width: 28px; min-height: 28px; padding: 0; border-radius: 6px;
+}
+.nav-dia:hover { color: var(--ink); background: var(--bg-soft); }
+.cobrar-card { margin-top: 6px; }
+@media (pointer: coarse) { .nav-dia { min-width: 40px; min-height: 40px; } }
 
 .tablero {
   display: grid; grid-template-columns: repeat(5, minmax(190px, 1fr));

@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-back" @click="$emit('close')">
+  <div class="modal-back" v-dialogo="() => $emit('close')">
     <div class="modal modal-wide" @click.stop>
       <div class="m-head"><h3>Nueva cita</h3></div>
 
@@ -10,7 +10,7 @@
 
         <!-- Paso 1: elegir paciente buscando por dueño o mascota -->
         <div class="field">
-          <label>Paciente</label>
+          <label for="cita-buscar">Paciente <span class="req">*</span></label>
           <div v-if="mascotaSel" class="sel-paciente">
             <div class="avatar-sm">{{ iniciales(mascotaSel.nombre) }}</div>
             <div class="grow">
@@ -20,50 +20,18 @@
             <button class="btn mini" @click="limpiarPaciente">Cambiar</button>
           </div>
 
-          <template v-else>
-            <div class="fil grow">
-              <Search :size="14" />
-              <input
-                v-model="q"
-                type="search"
-                placeholder="Busca por propietario, documento, teléfono o nombre de la mascota…"
-                @input="buscarDebounced"
-              />
-            </div>
-
-            <div v-if="resultados.length" class="resultados">
-              <div v-for="c in resultados" :key="c.id" class="res-cliente">
-                <div class="res-head">
-                  <strong>{{ c.nombre_completo }}</strong>
-                  <span class="mono muted">{{ c.numero_documento }}</span>
-                </div>
-                <div v-if="!c.mascotas.length" class="res-vacio">Sin mascotas registradas</div>
-                <button
-                  v-for="m in c.mascotas"
-                  :key="m.id"
-                  class="res-mascota"
-                  @click="elegir(c, m)"
-                >
-                  <PawPrint :size="13" /> {{ m.nombre }}
-                  <span class="tag">{{ m.especie }}</span>
-                </button>
-              </div>
-            </div>
-            <div v-else-if="q.length >= 2 && !buscando" class="res-vacio">
-              Sin coincidencias para “{{ q }}”.
-            </div>
-          </template>
+          <BuscadorPaciente v-else input-id="cita-buscar" @elegir="elegir" />
         </div>
 
         <!-- Paso 2: datos de la cita -->
         <div class="form-grid">
           <div class="field">
-            <label>Fecha y hora</label>
-            <input v-model="form.fecha_hora" type="datetime-local" />
+            <label for="cita-fecha">Fecha y hora</label>
+            <input id="cita-fecha" v-model="form.fecha_hora" type="datetime-local" @change="onFecha" />
           </div>
           <div class="field">
-            <label>Veterinario</label>
-            <select v-model="form.veterinario_id" @change="cargarSlots">
+            <label for="cita-vet">Veterinario</label>
+            <select id="cita-vet" v-model="form.veterinario_id" @change="cargarSlots">
               <option value="">Sin asignar</option>
               <option v-for="v in veterinarios" :key="v.id" :value="v.id">
                 {{ v.nombres }} {{ v.apellido_paterno }}
@@ -71,8 +39,8 @@
             </select>
           </div>
           <div class="field">
-            <label>Servicio</label>
-            <select v-model="form.servicio_id" @change="onServicio">
+            <label for="cita-serv">Servicio</label>
+            <select id="cita-serv" v-model="form.servicio_id" @change="onServicio">
               <option value="">Sin servicio</option>
               <option v-for="s in servicios" :key="s.id" :value="s.id">
                 {{ s.nombre }} — {{ fmtSoles(s.precio) }}
@@ -80,12 +48,12 @@
             </select>
           </div>
           <div class="field">
-            <label>Duración (min)</label>
-            <input v-model.number="form.duracion_min" type="number" min="5" step="5" />
+            <label for="cita-dur">Duración (min)</label>
+            <input id="cita-dur" v-model.number="form.duracion_min" type="number" min="5" step="5" />
           </div>
           <div class="field">
-            <label>Prioridad</label>
-            <select v-model="form.prioridad">
+            <label for="cita-prio">Prioridad</label>
+            <select id="cita-prio" v-model="form.prioridad">
               <option value="normal">Normal</option>
               <option value="preferente">Preferente</option>
               <option value="urgencia">Urgencia</option>
@@ -93,8 +61,8 @@
             </select>
           </div>
           <div class="field">
-            <label>Origen</label>
-            <select v-model="form.origen">
+            <label for="cita-origen">Origen</label>
+            <select id="cita-origen" v-model="form.origen">
               <option value="mostrador">Mostrador</option>
               <option value="telefono">Teléfono</option>
               <option value="whatsapp">WhatsApp</option>
@@ -102,8 +70,8 @@
             </select>
           </div>
           <div class="field" style="grid-column: 1 / -1">
-            <label>Motivo</label>
-            <textarea v-model="form.motivo" rows="2" placeholder="Motivo de la consulta…"></textarea>
+            <label for="cita-motivo">Motivo</label>
+            <textarea id="cita-motivo" v-model="form.motivo" rows="2" placeholder="Motivo de la consulta…"></textarea>
           </div>
         </div>
 
@@ -136,11 +104,13 @@
 
 <script setup>
 import { ref, reactive, onMounted } from "vue";
-import { Search, AlertCircle, PawPrint } from "lucide-vue-next";
+import { AlertCircle } from "lucide-vue-next";
+import BuscadorPaciente from "../../mascotas/components/BuscadorPaciente.vue";
 import { citasApi } from "../api/citas.api.js";
-import { clientesApi } from "../../clientes/api/clientes.api.js";
 import { catalogosApi } from "../../catalogos/api/catalogos.api.js";
 import { fmtSoles, fmtHora, iniciales } from "../../../shared/components/ui/format.js";
+import { hoyISO, datetimeLocal, datetimeLocalAISO } from "@/shared/utils/fechas.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const props = defineProps({
   veterinarios: { type: Array, default: () => [] },
@@ -148,9 +118,6 @@ const props = defineProps({
 });
 const emit = defineEmits(["close", "guardado"]);
 
-const q = ref("");
-const resultados = ref([]);
-const buscando = ref(false);
 const clienteSel = ref(null);
 const mascotaSel = ref(null);
 const servicios = ref([]);
@@ -159,7 +126,7 @@ const guardando = ref(false);
 const error = ref("");
 
 const form = reactive({
-  fecha_hora: `${props.fechaSugerida || new Date().toISOString().slice(0, 10)}T09:00`,
+  fecha_hora: `${props.fechaSugerida || hoyISO()}T09:00`,
   veterinario_id: "",
   servicio_id: "",
   duracion_min: 30,
@@ -168,29 +135,16 @@ const form = reactive({
   motivo: "",
 });
 
-let timer = null;
-function buscarDebounced() {
-  clearTimeout(timer);
-  if (q.value.length < 2) {
-    resultados.value = [];
-    return;
-  }
-  timer = setTimeout(async () => {
-    buscando.value = true;
-    try {
-      const r = await clientesApi.buscar(q.value, 8);
-      resultados.value = r.data ?? [];
-    } finally {
-      buscando.value = false;
-    }
-  }, 300);
-}
-
 function elegir(cliente, mascota) {
   clienteSel.value = cliente;
   mascotaSel.value = mascota;
-  resultados.value = [];
-  q.value = "";
+}
+
+/** Cambiar de día recarga los horarios libres del veterinario. */
+let diaSlots = "";
+function onFecha() {
+  const dia = (form.fecha_hora || "").slice(0, 10);
+  if (dia && dia !== diaSlots) cargarSlots();
 }
 function limpiarPaciente() {
   clienteSel.value = null;
@@ -206,14 +160,13 @@ function onServicio() {
 
 /** El SP devuelve ISO con zona; el input datetime-local necesita hora local sin zona. */
 function aLocal(iso) {
-  const d = new Date(iso);
-  const off = d.getTimezoneOffset();
-  return new Date(d.getTime() - off * 60000).toISOString().slice(0, 16);
+  return datetimeLocal(iso);
 }
 
 async function cargarSlots() {
   slots.value = [];
   if (!form.veterinario_id || !form.fecha_hora) return;
+  diaSlots = form.fecha_hora.slice(0, 10);
   try {
     const r = await citasApi.disponibilidad({
       veterinarioId: form.veterinario_id,
@@ -227,17 +180,32 @@ async function cargarSlots() {
 }
 
 async function guardar() {
+  if (guardando.value) return;
   error.value = "";
   if (!mascotaSel.value) {
     error.value = "Elige el paciente de la cita.";
     return;
+  }
+  const fecha = datetimeLocalAISO(form.fecha_hora);
+  if (!fecha) {
+    error.value = "Indica la fecha y hora de la cita.";
+    return;
+  }
+  // Una cita en el pasado casi siempre es un error de día o de AM/PM.
+  if (new Date(fecha).getTime() < Date.now() - 15 * 60000) {
+    const ok = await notify.confirm(
+      "La fecha ya pasó",
+      "¿Registrar igual la cita en una fecha pasada?",
+      { confirmText: "Registrar igual", icon: "warning" },
+    );
+    if (!ok) return;
   }
   guardando.value = true;
   try {
     await citasApi.crear({
       mascota_id: mascotaSel.value.id,
       // datetime-local no lleva zona: se envía como hora local del navegador.
-      fecha_hora: new Date(form.fecha_hora).toISOString(),
+      fecha_hora: fecha,
       veterinario_id: form.veterinario_id || undefined,
       servicio_id: form.servicio_id || undefined,
       duracion_min: form.duracion_min,
@@ -294,7 +262,7 @@ onMounted(async () => {
   padding: 5px 10px; border-radius: 8px; font-size: 12px;
   background: var(--emerald-soft); color: var(--emerald-ink);
   border: 1px solid var(--emerald-line); cursor: pointer;
-  font-family: var(--font-mono);
+  font-family: var(--font-display); font-variant-numeric: tabular-nums;
 }
 .slot:hover { background: var(--emerald-soft-2); }
 .slot.ocupado {
@@ -302,4 +270,5 @@ onMounted(async () => {
   border-color: var(--line); cursor: not-allowed; text-decoration: line-through;
 }
 .btn.mini { height: 26px; padding: 0 9px; font-size: 11.5px; }
+.req { color: var(--red); }
 </style>

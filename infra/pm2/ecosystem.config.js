@@ -5,6 +5,14 @@
 //   pm2 save && pm2 startup
 //
 // El frontend NO va aquí: se compila a estáticos y los sirve nginx.
+//
+// Rotación de logs: PM2 no rota por sí solo y /var/log/veterp crece sin
+// límite. Instalar el módulo una vez por servidor:
+//   pm2 install pm2-logrotate
+//   pm2 set pm2-logrotate:max_size 20M
+//   pm2 set pm2-logrotate:retain 14
+//   pm2 set pm2-logrotate:compress true
+// (o una regla de logrotate del sistema con `copytruncate` sobre /var/log/veterp/*.log)
 // =============================================================================
 
 module.exports = {

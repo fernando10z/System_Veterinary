@@ -49,11 +49,20 @@ export async function apiFetch(path, { method = "GET", body, headers = {}, _retr
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...headers,
   };
-  const res = await fetch(url, {
-    method,
-    headers: finalHeaders,
-    body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: finalHeaders,
+      body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // fetch solo falla así cuando no hubo respuesta (sin red, servidor caído):
+    // "Failed to fetch" no le dice nada a la recepcionista.
+    const err = new Error("No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.");
+    err.code = "NETWORK_ERROR";
+    throw err;
+  }
 
   if (res.status === 401 && !_retry) {
     const newToken = await tryRefresh();
@@ -80,6 +89,21 @@ export async function apiFetch(path, { method = "GET", body, headers = {}, _retr
     if (typeof window !== "undefined"
         && !window.location.pathname.endsWith("/cambiar-password")) {
       window.location.href = "/cambiar-password";
+    }
+  }
+
+  // Defensa: cuando un SP devuelve data:null, el backend reenvía el sobre
+  // completo ({ ok, data: { ok, data: null } }). Sin esto /caja/actual parecía
+  // una caja abierta vacía ("Turno abierto desde —").
+  const inner = payload?.data;
+  if (inner && typeof inner === "object" && !Array.isArray(inner)
+      && typeof inner.ok === "boolean" && "data" in inner
+      && Object.keys(inner).every((k) => ["ok", "data", "meta", "error"].includes(k))) {
+    if (inner.ok === false) {
+      payload.ok = false;
+      payload.error = inner.error;
+    } else {
+      payload.data = inner.data;
     }
   }
 

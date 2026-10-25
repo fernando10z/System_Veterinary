@@ -98,14 +98,14 @@
                       {{ u.nombres }} {{ u.apellido_paterno }}
                       <Stethoscope v-if="u.es_veterinario" :size="11" class="ico-vet" title="Veterinario colegiado" />
                     </strong>
-                    <small class="mono">{{ u.tipo_documento }} {{ u.numero_documento }}</small>
+                    <small class="codigo">{{ u.tipo_documento }} {{ u.numero_documento }}</small>
                   </div>
                 </div>
               </td>
               <td>
                 <div class="stack">
                   <span>{{ u.email }}</span>
-                  <small class="muted mono">{{ u.telefono || "—" }}</small>
+                  <small class="muted codigo">{{ u.telefono || "—" }}</small>
                 </div>
               </td>
               <td>
@@ -115,7 +115,7 @@
                 </span>
               </td>
               <td class="muted">{{ u.empresa_nombre || "Todas las empresas" }}</td>
-              <td class="muted mono">{{ u.ultimo_login_at ? fmtFechaHora(u.ultimo_login_at) : "Nunca" }}</td>
+              <td class="muted cifra">{{ u.ultimo_login_at ? fmtFechaHora(u.ultimo_login_at) : "Nunca" }}</td>
               <td>
                 <span :class="['estado-pill', toneEstado(u.estado)]">
                   <span class="dot"></span>{{ capitalizar(u.estado) }}
@@ -123,10 +123,10 @@
               </td>
               <td class="acciones-col">
                 <div class="row-actions">
-                  <button v-if="puedeEditar" class="btn mini" title="Editar" @click="abrirEditar(u)">
+                  <button v-if="puedeEditar" class="btn mini" title="Editar" @click="abrirEditar(u)" aria-label="Editar">
                     <Pencil :size="13" />
                   </button>
-                  <button v-if="puedeEditar" class="btn mini" title="Reiniciar contraseña" @click="resetPassword(u)">
+                  <button v-if="puedeEditar" class="btn mini" title="Reiniciar contraseña" @click="resetPassword(u)" aria-label="Reiniciar contraseña">
                     <KeyRound :size="13" />
                   </button>
                   <button
@@ -253,6 +253,8 @@ async function cargar() {
     });
     usuarios.value = r.data ?? [];
     meta.value = r.meta ?? {};
+  } catch (e) {
+    notify.toast(`No se pudieron cargar los usuarios: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

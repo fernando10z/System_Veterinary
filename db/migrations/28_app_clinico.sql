@@ -45,9 +45,20 @@ BEGIN
       'error', internal.error_jsonb('NOT_FOUND','El paciente indicado no existe','mascota_id'));
   END IF;
 
-  -- Solo un veterinario colegiado firma una consulta.
+  -- La cita que se atiende tiene que ser de esta clínica y de este paciente:
+  -- un id ajeno ponía "en atención" la cita de otra empresa.
+  IF v_cita IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM core.citas
+        WHERE id = v_cita AND empresa_id = v_emp
+          AND mascota_id = (p_payload->>'mascota_id')::uuid AND deleted_at IS NULL) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','La cita indicada no existe','cita_id'));
+  END IF;
+
+  -- Solo un veterinario colegiado de esta clínica firma una consulta.
   IF NOT EXISTS (SELECT 1 FROM core.users
-                  WHERE id = v_vet AND es_veterinario = true AND deleted_at IS NULL) THEN
+                  WHERE id = v_vet AND es_veterinario = true AND deleted_at IS NULL
+                    AND (empresa_id = v_emp OR id = p_user_id)) THEN
     RETURN jsonb_build_object('ok', false,
       'error', internal.error_jsonb('BUSINESS_RULE',
         'La consulta debe estar firmada por un veterinario colegiado','veterinario_id'));
@@ -157,13 +168,13 @@ BEGIN
   UPDATE core.consultas SET
     motivo                  = COALESCE(p_payload->>'motivo', motivo),
     anamnesis               = COALESCE(p_payload->>'anamnesis', anamnesis),
-    peso_kg                 = COALESCE(NULLIF(p_payload->>'peso_kg','')::numeric, peso_kg),
-    temperatura_c           = COALESCE(NULLIF(p_payload->>'temperatura_c','')::numeric, temperatura_c),
-    frecuencia_cardiaca     = COALESCE(NULLIF(p_payload->>'frecuencia_cardiaca','')::int, frecuencia_cardiaca),
-    frecuencia_respiratoria = COALESCE(NULLIF(p_payload->>'frecuencia_respiratoria','')::int, frecuencia_respiratoria),
+    peso_kg                 = CASE WHEN p_payload ? 'peso_kg' THEN NULLIF(p_payload->>'peso_kg','')::numeric ELSE peso_kg END,
+    temperatura_c           = CASE WHEN p_payload ? 'temperatura_c' THEN NULLIF(p_payload->>'temperatura_c','')::numeric ELSE temperatura_c END,
+    frecuencia_cardiaca     = CASE WHEN p_payload ? 'frecuencia_cardiaca' THEN NULLIF(p_payload->>'frecuencia_cardiaca','')::int ELSE frecuencia_cardiaca END,
+    frecuencia_respiratoria = CASE WHEN p_payload ? 'frecuencia_respiratoria' THEN NULLIF(p_payload->>'frecuencia_respiratoria','')::int ELSE frecuencia_respiratoria END,
     mucosas                 = COALESCE(p_payload->>'mucosas', mucosas),
-    tllc_seg                = COALESCE(NULLIF(p_payload->>'tllc_seg','')::numeric, tllc_seg),
-    condicion_corporal      = COALESCE(NULLIF(p_payload->>'condicion_corporal','')::int, condicion_corporal),
+    tllc_seg                = CASE WHEN p_payload ? 'tllc_seg' THEN NULLIF(p_payload->>'tllc_seg','')::numeric ELSE tllc_seg END,
+    condicion_corporal      = CASE WHEN p_payload ? 'condicion_corporal' THEN NULLIF(p_payload->>'condicion_corporal','')::int ELSE condicion_corporal END,
     examen_fisico           = COALESCE(p_payload->>'examen_fisico', examen_fisico),
     diagnostico             = COALESCE(p_payload->>'diagnostico', diagnostico),
     diagnostico_diferencial = COALESCE(p_payload->>'diagnostico_diferencial', diagnostico_diferencial),
@@ -171,7 +182,7 @@ BEGIN
     plan_terapeutico        = COALESCE(p_payload->>'plan_terapeutico', plan_terapeutico),
     prescripcion            = COALESCE(p_payload->>'prescripcion', prescripcion),
     indicaciones_casa       = COALESCE(p_payload->>'indicaciones_casa', indicaciones_casa),
-    proxima_visita          = COALESCE(NULLIF(p_payload->>'proxima_visita','')::date, proxima_visita),
+    proxima_visita          = CASE WHEN p_payload ? 'proxima_visita' THEN NULLIF(p_payload->>'proxima_visita','')::date ELSE proxima_visita END,
     updated_by              = p_user_id
   WHERE id = p_id;
 
@@ -201,6 +212,7 @@ SET search_path = core, app, internal, public
 AS $$
 DECLARE
   v_consulta RECORD;
+  v_servicio UUID;
 BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
 
@@ -220,6 +232,37 @@ BEGIN
   END IF;
 
   UPDATE core.consultas SET estado = 'cerrada', updated_by = p_user_id WHERE id = p_id;
+
+  -- La consulta también se cobra. Hasta ahora llegaban a la cuenta la vacuna,
+  -- la cirugía y el día de hospitalización, pero no el acto que más se repite:
+  -- si recepción no la tecleaba a mano, la consulta salía gratis.
+  --
+  -- Tarifa: la del servicio de la cita si es una consulta; si no, la consulta
+  -- general de la clínica. No se carga si ya hay un cargo de tipo consulta
+  -- ligado a esta atención (lo agregó el veterinario, o es un control incluido
+  -- que ya pasó por el plan), y es idempotente por consulta.
+  IF NOT EXISTS (
+       SELECT 1 FROM core.ordenes_servicio os
+         JOIN core.servicios s ON s.id = os.servicio_id
+        WHERE os.consulta_id = p_id AND os.estado <> 'anulado' AND s.tipo = 'consulta') THEN
+    SELECT s.id INTO v_servicio
+      FROM core.citas c JOIN core.servicios s ON s.id = c.servicio_id
+     WHERE c.id = v_consulta.cita_id AND s.tipo = 'consulta' AND s.deleted_at IS NULL;
+
+    IF v_servicio IS NULL THEN
+      SELECT id INTO v_servicio FROM core.servicios
+       WHERE empresa_id = v_consulta.empresa_id AND tipo = 'consulta'
+         AND estado = 'activo' AND deleted_at IS NULL
+       ORDER BY codigo LIMIT 1;
+    END IF;
+
+    PERFORM internal.registrar_cargo_servicio(
+      v_consulta.empresa_id, v_servicio, v_consulta.mascota_id, p_user_id, 1,
+      jsonb_build_object(
+        'consulta_id', p_id, 'cita_id', v_consulta.cita_id,
+        'veterinario_id', v_consulta.veterinario_id,
+        'origen_tabla', 'consultas', 'origen_id', p_id));
+  END IF;
 
   IF v_consulta.cita_id IS NOT NULL THEN
     UPDATE core.citas
@@ -1363,9 +1406,30 @@ BEGIN
   PERFORM internal.assert_permiso(p_user_id, 'clinico:registrar');
   PERFORM internal.validar_payload(p_payload, ARRAY['mascota_id','servicio_id']);
 
-  SELECT cliente_id INTO v_cliente FROM core.mascotas
+  SELECT cliente_id, empresa_id INTO v_cliente, v_emp FROM core.mascotas
    WHERE id = v_mascota AND deleted_at IS NULL
      AND (internal.es_acceso_global(p_user_id, p_is_super_admin) OR empresa_id = v_emp);
+
+  IF v_cliente IS NULL THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','El paciente indicado no existe','mascota_id'));
+  END IF;
+
+  IF v_cant <= 0 OR v_desc < 0 THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('VALIDATION_ERROR',
+        'La cantidad debe ser mayor a cero y el descuento no puede ser negativo'));
+  END IF;
+
+  IF (NULLIF(p_payload->>'cita_id','') IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM core.citas WHERE id = (p_payload->>'cita_id')::uuid AND empresa_id = v_emp))
+     OR (NULLIF(p_payload->>'consulta_id','') IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM core.consultas WHERE id = (p_payload->>'consulta_id')::uuid AND empresa_id = v_emp))
+     OR (NULLIF(p_payload->>'veterinario_id','') IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM core.users WHERE id = (p_payload->>'veterinario_id')::uuid AND empresa_id = v_emp)) THEN
+    RETURN jsonb_build_object('ok', false,
+      'error', internal.error_jsonb('NOT_FOUND','Referencia no encontrada'));
+  END IF;
 
   SELECT COALESCE(NULLIF(p_payload->>'precio_unitario','')::numeric, s.precio) INTO v_precio
     FROM core.servicios s
@@ -1397,10 +1461,12 @@ BEGIN
 
   -- Descuento pactado en el mostrador, sobre lo que haya quedado tras el plan.
   IF v_desc > 0 THEN
+    -- No se descuenta más de lo que queda: un descuento mayor que el importe
+    -- dejaría una línea que no cuadra (cantidad × precio − descuento < 0).
     UPDATE core.ordenes_servicio
-       SET descuento = descuento + v_desc,
-           total = GREATEST(total - v_desc, 0)
-     WHERE id = v_id;
+       SET descuento = descuento + LEAST(v_desc, total),
+           total = total - LEAST(v_desc, total)
+     WHERE id = v_id AND facturado = false;
   END IF;
 
   IF p_payload ? 'estado' THEN

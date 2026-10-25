@@ -33,7 +33,7 @@
         :disabled="page <= 1"
         title="Anterior"
         @click="go(page - 1)"
-      >
+       aria-label="Anterior">
         <ChevronLeft :size="14" />
       </button>
 

@@ -60,7 +60,7 @@
               <td>
                 <div class="stack">
                   <strong>{{ c.nombre }}</strong>
-                  <small class="muted mono">{{ c.codigo }}</small>
+                  <small class="muted codigo">{{ c.codigo }}</small>
                 </div>
               </td>
               <td>
@@ -75,7 +75,7 @@
                   </div>
                 </div>
               </td>
-              <td class="mono">{{ fmtFechaHora(c.fecha) }}</td>
+              <td class="cifra">{{ fmtFechaHora(c.fecha) }}</td>
               <td>{{ c.cirujano || "—" }}</td>
               <td>
                 <span :class="['estado-pill', c.consentimiento_firmado ? 'ok' : 'danger']">
@@ -112,7 +112,7 @@
     </section>
 
     <!-- Registrar el resultado quirúrgico -->
-    <div v-if="sel" class="modal-back" @click="sel = null">
+    <div v-if="sel" class="modal-back" v-dialogo="() => (sel = null)">
       <div class="modal modal-wide" @click.stop>
         <div class="m-head"><h3>{{ sel.nombre }} — {{ sel.mascota }}</h3></div>
         <div class="m-body">
@@ -130,36 +130,36 @@
 
           <div class="form-grid">
             <div class="field">
-              <label>Inicio</label>
-              <input v-model="res.fecha_inicio" type="datetime-local" />
+              <label for="cirugias-fecha-inicio">Inicio</label>
+              <input id="cirugias-fecha-inicio" v-model="res.fecha_inicio" type="datetime-local" />
             </div>
             <div class="field">
-              <label>Fin</label>
-              <input v-model="res.fecha_fin" type="datetime-local" />
+              <label for="cirugias-fecha-fin">Fin</label>
+              <input id="cirugias-fecha-fin" v-model="res.fecha_fin" type="datetime-local" />
             </div>
             <div class="field">
-              <label>Anestesia</label>
-              <input v-model.trim="res.anestesia_tipo" type="text" placeholder="Inhalatoria (isoflurano)" />
+              <label for="cirugias-anestesia-tipo">Anestesia</label>
+              <input id="cirugias-anestesia-tipo" v-model.trim="res.anestesia_tipo" type="text" placeholder="Inhalatoria (isoflurano)" />
             </div>
             <div class="field">
-              <label>Dosis anestésica</label>
-              <input v-model.trim="res.anestesia_dosis" type="text" />
+              <label for="cirugias-anestesia-dosis">Dosis anestésica</label>
+              <input id="cirugias-anestesia-dosis" v-model.trim="res.anestesia_dosis" type="text" />
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Hallazgos</label>
-              <textarea v-model="res.hallazgos" rows="2"></textarea>
+              <label for="cirugias-hallazgos">Hallazgos</label>
+              <textarea id="cirugias-hallazgos" v-model="res.hallazgos" rows="2"></textarea>
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Complicaciones</label>
-              <textarea v-model="res.complicaciones" rows="2"></textarea>
+              <label for="cirugias-complicaciones">Complicaciones</label>
+              <textarea id="cirugias-complicaciones" v-model="res.complicaciones" rows="2"></textarea>
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Resultado</label>
-              <textarea v-model="res.resultado" rows="2"></textarea>
+              <label for="cirugias-resultado">Resultado</label>
+              <textarea id="cirugias-resultado" v-model="res.resultado" rows="2"></textarea>
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Cuidados post-operatorios</label>
-              <textarea v-model="res.cuidados_post" rows="3"></textarea>
+              <label for="cirugias-cuidados-post">Cuidados post-operatorios</label>
+              <textarea id="cirugias-cuidados-post" v-model="res.cuidados_post" rows="3"></textarea>
             </div>
           </div>
         </div>
@@ -183,6 +183,8 @@ import { clinicoApi } from "../api/clinico.api.js";
 import { useAuth } from "../../../shared/composables/useAuth.js";
 import { fmtFechaHora, capitalizar, iniciales } from "../../../shared/components/ui/format.js";
 import { abrirDocumento } from "../../../shared/print/abrir-documento.js";
+import { datetimeLocal, datetimeLocalAISO } from "@/shared/utils/fechas.js";
+import { notify } from "@/shared/composables/useNotify.js";
 
 const { hasPermission } = useAuth();
 const puedeRegistrar = computed(() => hasPermission("clinico:registrar"));
@@ -211,12 +213,10 @@ function tone(e) {
 function abrirResultado(c) {
   sel.value = c;
   error.value = "";
-  const ahora = new Date();
-  const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   Object.assign(res, {
     consentimiento_firmado: !!c.consentimiento_firmado,
-    fecha_inicio: c.fecha_inicio ? local(new Date(c.fecha_inicio)) : local(ahora),
-    fecha_fin: c.fecha_fin ? local(new Date(c.fecha_fin)) : local(ahora),
+    fecha_inicio: datetimeLocal(c.fecha_inicio || new Date()),
+    fecha_fin: datetimeLocal(c.fecha_fin || new Date()),
     anestesia_tipo: c.anestesia_tipo ?? "",
     anestesia_dosis: "",
     hallazgos: c.hallazgos ?? "",
@@ -233,7 +233,7 @@ async function guardarResultado() {
     const p = { consentimiento_firmado: res.consentimiento_firmado, estado: "realizada" };
     for (const [k, v] of Object.entries(res)) {
       if (k === "consentimiento_firmado" || v === "" || v === null) continue;
-      p[k] = k.startsWith("fecha_") ? new Date(v).toISOString() : v;
+      p[k] = k.startsWith("fecha_") ? datetimeLocalAISO(v) : v;
     }
     await clinicoApi.resultadoCirugia(sel.value.id, p);
     sel.value = null;
@@ -250,6 +250,8 @@ async function cargar() {
   try {
     const r = await clinicoApi.cirugias({ estado: estado.value || undefined });
     cirugias.value = r.data ?? [];
+  } catch (e) {
+    notify.toast(`No se pudieron cargar las cirugías: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }

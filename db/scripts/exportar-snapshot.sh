@@ -30,7 +30,8 @@ admin_psql() {
 
 echo "→ Construyendo $TMP_DB desde db/migrations/"
 admin_psql -c "DROP DATABASE IF EXISTS $TMP_DB;" -c "CREATE DATABASE $TMP_DB;" > /dev/null
-DB_NAME="$TMP_DB" bash "$SCRIPT_DIR/apply-migrations.sh" | tail -1
+# El snapshot es el de la demo: esquema + db/seeds/.
+DB_NAME="$TMP_DB" SEED_DEMO=1 bash "$SCRIPT_DIR/apply-migrations.sh" | tail -2
 
 COMMIT="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo desconocido)"
 FECHA="$(date +%Y-%m-%d)"

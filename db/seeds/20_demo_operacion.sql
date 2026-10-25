@@ -1,8 +1,11 @@
 -- =============================================================================
--- 99_seeds_demo.sql — Datos de demostración (operación de una clínica real)
+-- db/seeds/20_demo_operacion.sql — Operación de demostración de una clínica
 --
 -- Propietarios, pacientes, agenda, historia clínica, ventas y cobros, para que
 -- el sistema se pueda mostrar con contenido creíble desde el primer arranque.
+--
+-- No es una migración: lo aplica `apply-migrations.sh` solo con SEED_DEMO=1,
+-- después de 10_demo_empresas.sql (de ahí salen las empresas y los usuarios).
 --
 -- La operación se carga en la EMPRESA 1. La empresa 2 recibe su propia cartera
 -- pequeña, para que la demo muestre el aislamiento con datos a ambos lados.

@@ -24,9 +24,9 @@
       <!-- Calendario -->
       <div class="drp-cal">
         <div class="cal-head">
-          <button type="button" class="cal-nav" @click="mover(-1)"><ChevronLeft :size="16" /></button>
+          <button type="button" class="cal-nav" aria-label="Mes anterior" @click="mover(-1)"><ChevronLeft :size="16" /></button>
           <span class="cal-title">{{ tituloMes }}</span>
-          <button type="button" class="cal-nav" @click="mover(1)"><ChevronRight :size="16" /></button>
+          <button type="button" class="cal-nav" aria-label="Mes siguiente" @click="mover(1)"><ChevronRight :size="16" /></button>
         </div>
 
         <div class="cal-grid">

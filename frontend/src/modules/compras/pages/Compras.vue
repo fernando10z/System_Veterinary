@@ -80,15 +80,15 @@
                     <small class="muted">{{ p.nombre_comercial || p.categoria || "—" }}</small>
                   </div>
                 </td>
-                <td class="mono">{{ p.tipo_documento }} {{ p.numero_documento }}</td>
+                <td class="codigo">{{ p.tipo_documento }} {{ p.numero_documento }}</td>
                 <td>
                   <div class="stack">
-                    <span class="mono">{{ p.telefono || "—" }}</span>
+                    <span class="codigo">{{ p.telefono || "—" }}</span>
                     <small class="muted">{{ p.correo || "" }}</small>
                   </div>
                 </td>
-                <td class="num mono">{{ p.total_ordenes }}</td>
-                <td class="num mono">
+                <td class="num cifra">{{ p.total_ordenes }}</td>
+                <td class="num cifra">
                   <span :class="Number(p.deuda_pendiente) > 0 ? 'deuda' : 'muted'">
                     {{ fmtSoles(p.deuda_pendiente) }}
                   </span>
@@ -99,7 +99,7 @@
                     <button v-if="puedePagar && Number(p.deuda_pendiente) > 0" class="btn mini" title="Registrar pago" @click="abrirPago(p)">
                       <CreditCard :size="13" />
                     </button>
-                    <button v-if="puedeGestionar" class="btn mini" title="Editar" @click="abrirProveedor(p)">
+                    <button v-if="puedeGestionar" class="btn mini" title="Editar" @click="abrirProveedor(p)" aria-label="Editar">
                       <Pencil :size="13" />
                     </button>
                   </div>
@@ -128,12 +128,12 @@
             </thead>
             <tbody>
               <tr v-for="o in ordenes" :key="o.id">
-                <td class="mono"><strong>{{ o.numero }}</strong></td>
+                <td class="codigo"><strong>{{ o.numero }}</strong></td>
                 <td>{{ o.proveedor }}</td>
-                <td class="mono">{{ fmtDate(o.fecha_emision) }}</td>
-                <td class="num mono">{{ o.items }}</td>
-                <td class="num mono">{{ fmtSoles(o.total) }}</td>
-                <td class="num mono">
+                <td class="cifra">{{ fmtDate(o.fecha_emision) }}</td>
+                <td class="num cifra">{{ o.items }}</td>
+                <td class="num cifra">{{ fmtSoles(o.total) }}</td>
+                <td class="num cifra">
                   <span :class="Number(o.saldo_pendiente) > 0 ? 'deuda' : 'muted'">
                     {{ fmtSoles(o.saldo_pendiente) }}
                   </span>
@@ -177,12 +177,12 @@
             </thead>
             <tbody>
               <tr v-for="p in pagos" :key="p.id">
-                <td class="mono">{{ p.numero }}</td>
+                <td class="codigo">{{ p.numero }}</td>
                 <td>{{ p.proveedor }}</td>
-                <td class="mono">{{ p.orden_compra || "—" }}</td>
+                <td class="codigo">{{ p.orden_compra || "—" }}</td>
                 <td>{{ capitalizar(p.metodo) }}</td>
-                <td class="num mono">{{ fmtSoles(p.monto) }}</td>
-                <td class="mono">{{ fmtFechaHora(p.fecha_pago) }}</td>
+                <td class="num cifra">{{ fmtSoles(p.monto) }}</td>
+                <td class="cifra">{{ fmtFechaHora(p.fecha_pago) }}</td>
                 <td class="muted">{{ p.registrado_por || "—" }}</td>
               </tr>
             </tbody>
@@ -208,7 +208,7 @@
     />
 
     <!-- Pago a proveedor -->
-    <div v-if="pagoPara" class="modal-back" @click="pagoPara = null">
+    <div v-if="pagoPara" class="modal-back" v-dialogo="() => (pagoPara = null)">
       <div class="modal" @click.stop>
         <div class="m-head"><h3>Pago a {{ pagoPara.razon_social || pagoPara.proveedor }}</h3></div>
         <div class="m-body">
@@ -217,12 +217,12 @@
           </div>
           <div class="form-grid">
             <div class="field">
-              <label>Monto (S/) <span class="req">*</span></label>
-              <input v-model.number="pago.monto" type="number" min="0.01" step="0.01" />
+              <label for="compras-monto">Monto (S/) <span class="req">*</span></label>
+              <input id="compras-monto" v-model.number="pago.monto" type="number" min="0.01" step="0.01" />
             </div>
             <div class="field">
-              <label>Método</label>
-              <select v-model="pago.metodo">
+              <label for="compras-metodo">Método</label>
+              <select id="compras-metodo" v-model="pago.metodo">
                 <option value="transferencia">Transferencia</option>
                 <option value="efectivo">Efectivo</option>
                 <option value="deposito">Depósito</option>
@@ -230,8 +230,8 @@
               </select>
             </div>
             <div class="field" style="grid-column: 1 / -1">
-              <label>Referencia</label>
-              <input v-model.trim="pago.referencia" type="text" placeholder="N.º de operación" />
+              <label for="compras-referencia">Referencia</label>
+              <input id="compras-referencia" v-model.trim="pago.referencia" type="text" placeholder="N.º de operación" />
             </div>
           </div>
         </div>
@@ -365,6 +365,8 @@ async function cargar() {
     proveedores.value = pr.data ?? [];
     ordenes.value = or.data ?? [];
     pagos.value = pa.data ?? [];
+  } catch (e) {
+    notify.toast(`No se pudieron cargar las compras: ${e.message}`, "error");
   } finally {
     cargando.value = false;
   }
