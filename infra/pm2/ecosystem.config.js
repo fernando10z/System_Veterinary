@@ -1,14 +1,14 @@
 // =============================================================================
-// PM2 ecosystem — Producción ERP Veterinary (servidor erp-prod).
+// PM2 ecosystem — Producción ERP Veterinary.
 //
 //   veterinary-api → backend NestJS (dist/main.js) en :3200
+//   veterinary-web → frontend Vue (estático SPA) en :5373
 //
-// El frontend NO corre en pm2: lo sirve Caddy (infra/caddy/veterinary.caddy)
-// en 127.0.0.1:5373 junto con /api → :3200 y /veterinary → MinIO, con las
-// mismas cabeceras de seguridad que frontend/nginx.conf. Un solo hostname en
-// el Cloudflare Tunnel: veterinary.solvifylab.com → localhost:5373.
+// Un solo hostname en el Cloudflare Tunnel: /api/* → :3200, el resto → :5373.
+// Así la cookie de sesión viaja al mismo origen. Las descargas (URLs firmadas
+// de MinIO) salen por files.solvifylab.com (STORAGE_PUBLIC_ENDPOINT).
 //
-// Corre desde $APP/current (symlink al release activo), nunca desde src/.
+// Ambos corren desde $APP/current (symlink al release activo), nunca desde src/.
 // Publicar: infra/scripts/deploy.sh   ·   Volver atrás: deploy.sh rollback
 //
 // Arranque inicial:
@@ -33,6 +33,24 @@ module.exports = {
       env: { NODE_ENV: "production", TZ: "America/Lima" },
       out_file: `${LOGS}/api-out.log`,
       error_file: `${LOGS}/api-err.log`,
+      merge_logs: true,
+      time: true,
+    },
+    {
+      // Sirve el build estático como SPA. Lee cada archivo por request a través
+      // del symlink, así que un deploy de frontend no necesita reiniciarlo.
+      name: "veterinary-web",
+      namespace: "veterinary",
+      script: "serve",
+      env: {
+        PM2_SERVE_PATH: `${APP}/current/frontend`,
+        PM2_SERVE_PORT: "5373",
+        PM2_SERVE_SPA: "true",
+        PM2_SERVE_HOMEPAGE: "/index.html",
+      },
+      autorestart: true,
+      out_file: `${LOGS}/web-out.log`,
+      error_file: `${LOGS}/web-err.log`,
       merge_logs: true,
       time: true,
     },
